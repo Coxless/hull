@@ -13,7 +13,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::task::JoinHandle;
 use tokio::time::{timeout, Instant};
 
-/// bash の起動 (Windows の `--login` は遅い) も含めて待つ時間。
+/// bash の起動も含めて待つ時間。
 pub const TIMEOUT: Duration = Duration::from_secs(60);
 
 pub struct Daemon {
@@ -37,19 +37,13 @@ pub fn start_daemon_with(ring_capacity: usize) -> Daemon {
 pub fn test_endpoint(dir: &tempfile::TempDir) -> String {
     static NEXT: AtomicU32 = AtomicU32::new(0);
     let n = NEXT.fetch_add(1, Ordering::Relaxed);
-    if cfg!(windows) {
-        format!(r"\\.\pipe\hull-terminal-test-{}-{n}", std::process::id())
-    } else {
-        dir.path().join(format!("daemon-{n}.sock")).to_string_lossy().into_owned()
-    }
+    dir.path().join(format!("daemon-{n}.sock")).to_string_lossy().into_owned()
 }
 
-/// 開発者の `.bashrc` に左右されないよう、Ubuntu では設定を読まずに起動する。
+/// 開発者の `.bashrc` に左右されないよう、設定を読まずに起動する。
 pub fn test_shell() -> ShellSpec {
     let mut shell = ShellSpec::detect().expect("bash が見つかりません");
-    if cfg!(unix) {
-        shell.args = vec!["--norc".into(), "--noprofile".into(), "-i".into()];
-    }
+    shell.args = vec!["--norc".into(), "--noprofile".into(), "-i".into()];
     shell
 }
 

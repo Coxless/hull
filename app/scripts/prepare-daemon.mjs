@@ -15,8 +15,6 @@ const triple = /^host: (.+)$/m.exec(execFileSync("rustc", ["-vV"], { encoding: "
 if (!triple) {
   throw new Error("rustc -vV からターゲットトリプルを読み取れません");
 }
-const exe = triple.includes("windows") ? ".exe" : "";
-
 execFileSync("cargo", ["build", "--release", "-p", "hull-terminal-daemon"], {
   cwd: root,
   stdio: "inherit",
@@ -24,6 +22,6 @@ execFileSync("cargo", ["build", "--release", "-p", "hull-terminal-daemon"], {
 
 const binaries = join(app, "src-tauri", "binaries");
 mkdirSync(binaries, { recursive: true });
-const target = join(binaries, `hull-terminal-daemon-${triple}${exe}`);
-copyFileSync(join(root, "target", "release", `hull-terminal-daemon${exe}`), target);
+const target = join(binaries, `hull-terminal-daemon-${triple}`);
+copyFileSync(join(root, "target", "release", "hull-terminal-daemon"), target);
 console.log(`デーモンを ${target} に置きました`);

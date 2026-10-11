@@ -27,7 +27,6 @@ async fn echo_returns_output_and_exit_ends_the_daemon() {
     // bash が終わったらデーモンも終わる。
     let code = timeout(TIMEOUT, daemon.handle).await.expect("デーモンが終了すること");
     assert_eq!(code.unwrap().unwrap(), 7);
-    #[cfg(unix)]
     assert!(!std::path::Path::new(&daemon.endpoint).exists(), "ソケットファイルが消えていること");
 }
 
@@ -133,7 +132,6 @@ async fn a_second_daemon_on_the_same_endpoint_refuses_to_start() {
     client.read_until_exit().await;
 }
 
-#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_stale_socket_file_is_replaced() {
     let dir = tempfile::tempdir().unwrap();
@@ -191,15 +189,12 @@ async fn large_output_arrives_complete_and_in_order() {
         .await;
     let seen = client.read_until("done-64").await;
 
-    // ConPTY は画面を描き直すので、行がそのまま全部届くとは限らない。Ubuntu だけで確かめる。
-    if cfg!(unix) {
-        let mut pos = 0;
-        for i in 0..20000 {
-            let line = format!("n{}e\r\n", i * 3);
-            match seen[pos..].find(&line) {
-                Some(found) => pos += found + line.len(),
-                None => panic!("{i} 行目が抜けているか、順番が違います"),
-            }
+    let mut pos = 0;
+    for i in 0..20000 {
+        let line = format!("n{}e\r\n", i * 3);
+        match seen[pos..].find(&line) {
+            Some(found) => pos += found + line.len(),
+            None => panic!("{i} 行目が抜けているか、順番が違います"),
         }
     }
 
@@ -228,9 +223,6 @@ async fn replay_is_limited_to_the_ring_capacity() {
 }
 
 /// Phase 2 のブロック区切りに使う OSC 133 が、PTY を通ってそのまま届くかを確かめる。
-///
-/// Windows の ConPTY は制御シーケンスを書き換えることがあるので、Windows では結果を
-/// 記録するだけにして、失敗にはしない (`cargo test -- --nocapture` で表示される)。
 #[tokio::test(flavor = "multi_thread")]
 async fn osc_133_sequences_pass_through_the_pty() {
     let daemon = start_daemon();
@@ -246,10 +238,7 @@ async fn osc_133_sequences_pass_through_the_pty() {
     let a = find(&client.output, b"\x1b]133;A\x07").is_some();
     let d = find(&client.output, b"\x1b]133;D;0\x07").is_some();
     let osc7 = find(&client.output, b"\x1b]7;file:///tmp\x07").is_some();
-    println!("OSC 133 passthrough on {}: A={a} D={d} OSC7={osc7}", std::env::consts::OS);
-    if cfg!(unix) {
-        assert!(a && d && osc7, "Ubuntu の PTY は OSC をそのまま通すこと");
-    }
+    assert!(a && d && osc7, "PTY は OSC をそのまま通すこと (A={a} D={d} OSC7={osc7})");
 
     client.type_line("exit").await;
     client.read_until_exit().await;

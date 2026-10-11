@@ -132,8 +132,6 @@ pub struct AttachInfo {
 pub struct AppOptions {
     /// 描画方法 (`webgl` / `dom`)。`None` なら WebGL を試し、使えなければ DOM にする。
     renderer: Option<String>,
-    /// この OS では動かないなどの警告。
-    warning: Option<String>,
 }
 
 /// 描画方法を指定する環境変数 (`webgl` / `dom`)。
@@ -145,7 +143,7 @@ pub fn app_options() -> AppOptions {
         .ok()
         .filter(|v| !v.is_empty())
         .or_else(|| (!daemon::gpu_available()).then(|| "dom".to_string()));
-    AppOptions { renderer, warning: daemon::platform_warning() }
+    AppOptions { renderer }
 }
 
 /// デーモンに接続し (いなければ起動し)、画面をつなぐ。

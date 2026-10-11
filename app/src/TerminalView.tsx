@@ -214,16 +214,13 @@ export function TerminalView({ onStatus }: Props) {
     term.focus();
 
     void (async () => {
-      const options = await appOptions().catch(() => ({ renderer: null, warning: null }));
+      const options = await appOptions().catch(() => ({ renderer: null }));
       if (disposed) {
         return;
       }
       update({
         renderer: enableRenderer(term, options.renderer, (renderer) => update({ renderer })),
       });
-      if (options.warning) {
-        notice(options.warning);
-      }
       await connect();
     })();
 

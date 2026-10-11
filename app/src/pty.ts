@@ -15,7 +15,6 @@ export interface AttachInfo {
 
 export interface AppOptions {
   renderer: string | null;
-  warning: string | null;
 }
 
 export interface PtyHandlers {

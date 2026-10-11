@@ -1,4 +1,4 @@
-//! デーモンへの接続と、いないときの起動。この OS で何が使えるかの確認もここで行う。
+//! デーモンへの接続と、いないときの起動。GPU が使えるかの確認もここで行う。
 
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -12,8 +12,7 @@ use hull_terminal_protocol::{
 /// デーモンの実行ファイルの場所を上書きする環境変数。
 const DAEMON_ENV: &str = "HULL_TERMINAL_DAEMON";
 
-const DAEMON_NAME: &str =
-    if cfg!(windows) { "hull-terminal-daemon.exe" } else { "hull-terminal-daemon" };
+const DAEMON_NAME: &str = "hull-terminal-daemon";
 
 /// 起動したデーモンが待ち受けを始めるまで待つ時間。
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
@@ -101,7 +100,6 @@ fn spawn(endpoint: &str) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(unix)]
 fn spawn_detached(mut command: Command) -> std::io::Result<std::process::Child> {
     use std::os::unix::process::CommandExt;
 
@@ -116,84 +114,9 @@ fn spawn_detached(mut command: Command) -> std::io::Result<std::process::Child> 
     command.spawn()
 }
 
-#[cfg(windows)]
-fn spawn_detached(mut command: Command) -> std::io::Result<std::process::Child> {
-    use std::os::windows::process::CommandExt;
-
-    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
-
-    // UI がジョブに入れられていると、UI の終了でデーモンも止められることがある。
-    // まずジョブから外して起動を試み、許されていなければそのまま起動する。
-    let base = CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW;
-    command.creation_flags(base | CREATE_BREAKAWAY_FROM_JOB);
-    match command.spawn() {
-        Ok(child) => Ok(child),
-        Err(_) => {
-            command.creation_flags(base);
-            command.spawn()
-        }
-    }
-}
-
-#[cfg(unix)]
 fn create_private_dir(dir: &std::path::Path) {
     use std::os::unix::fs::DirBuilderExt;
     let _ = std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir);
-}
-
-#[cfg(not(unix))]
-fn create_private_dir(dir: &std::path::Path) {
-    let _ = std::fs::create_dir_all(dir);
-}
-
-/// この OS で PTY が使えない場合の警告。
-///
-/// ConPTY は Windows 10 1809 (ビルド 17763) から。それより古いと bash を起動できない。
-#[cfg(windows)]
-pub fn platform_warning() -> Option<String> {
-    const CONPTY_MIN_BUILD: u32 = 17763;
-
-    #[repr(C)]
-    struct OsVersionInfo {
-        size: u32,
-        major: u32,
-        minor: u32,
-        build: u32,
-        platform_id: u32,
-        csd_version: [u16; 128],
-    }
-
-    #[link(name = "ntdll")]
-    extern "system" {
-        fn RtlGetVersion(info: *mut OsVersionInfo) -> i32;
-    }
-
-    let mut info = OsVersionInfo {
-        size: std::mem::size_of::<OsVersionInfo>() as u32,
-        major: 0,
-        minor: 0,
-        build: 0,
-        platform_id: 0,
-        csd_version: [0; 128],
-    };
-    // SAFETY: `info` は RtlGetVersion が求める OSVERSIONINFOW と同じ配置で、size を設定してある。
-    let status = unsafe { RtlGetVersion(&mut info) };
-    let too_old = info.major < 10 || (info.major == 10 && info.build < CONPTY_MIN_BUILD);
-    if status == 0 && too_old {
-        Some(format!(
-            "この Windows (ビルド {}) では hull-terminal は動きません。Windows 10 バージョン 1809 (ビルド {CONPTY_MIN_BUILD}) 以降が必要です",
-            info.build
-        ))
-    } else {
-        None
-    }
-}
-
-#[cfg(not(windows))]
-pub fn platform_warning() -> Option<String> {
-    None
 }
 
 /// 画面を GPU で描けるか。描けない環境では、WebGL ではなく DOM で描く。
@@ -201,7 +124,6 @@ pub fn platform_warning() -> Option<String> {
 /// WebKitGTK は GPU がなくても WebGL をソフトウェアで動かすが、DOM 描画より重く、
 /// GPU での合成を切ってある (`WEBKIT_DISABLE_COMPOSITING_MODE`) と画面が正しく更新されない。
 /// GPU を扱えるドライバーは `/dev/dri/renderD*` を作るので、その有無で見分ける。
-#[cfg(target_os = "linux")]
 pub fn gpu_available() -> bool {
     if std::env::var_os("WEBKIT_DISABLE_COMPOSITING_MODE")
         .is_some_and(|v| !v.is_empty() && v != "0")
@@ -211,9 +133,4 @@ pub fn gpu_available() -> bool {
     std::fs::read_dir("/dev/dri").is_ok_and(|entries| {
         entries.flatten().any(|entry| entry.file_name().to_string_lossy().starts_with("renderD"))
     })
-}
-
-#[cfg(not(target_os = "linux"))]
-pub fn gpu_available() -> bool {
-    true
 }

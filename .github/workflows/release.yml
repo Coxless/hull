@@ -1,4 +1,4 @@
-# `v0.1.0` のようなタグを push すると、.deb と Windows のインストーラーを作って GitHub Releases に公開する。
+# `v0.1.0` のようなタグを push すると、.deb を作って GitHub Releases に公開する。
 #
 #   git switch main && git pull
 #   git tag v0.1.0 && git push origin v0.1.0
@@ -46,18 +46,16 @@ jobs:
     permissions:
       contents: write
     steps:
-      # Ubuntu と Windows の成果物を1つのディレクトリに集める。
       - uses: actions/download-artifact@v4
         with:
-          pattern: hull-terminal-*
+          name: hull-terminal-deb
           path: dist
-          merge-multiple: true
 
       - name: リリースを作る
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          (cd dist && sha256sum *.deb *.exe | tee SHA256SUMS)
+          (cd dist && sha256sum *.deb | tee SHA256SUMS)
           ls -la dist
           cat > notes.md <<NOTES
           ## インストール (Ubuntu 24.04 以降)
@@ -68,23 +66,13 @@ jobs:
           hull
           \`\`\`
 
-          ## インストール (Windows 10 / 11)
-
-          下の Assets から \`hull-terminal_${GITHUB_REF_NAME#v}_x64-setup.exe\` をダウンロードして実行します。
-          先に [Git for Windows](https://gitforwindows.org/) を入れておいてください (Git Bash を使います)。
-
-          インストーラーには署名がないので、実行時に Windows の警告 (SmartScreen) が出ます。
-          Windows 版は CI で入れて起動できることだけを確かめており、実機での確認はまだです。
-
-          ## ファイルの確認
-
-          \`gh\` がなければ、下の Assets からダウンロードしてください。
-          \`SHA256SUMS\` でファイルを確かめられます (\`sha256sum -c --ignore-missing SHA256SUMS\`)。
+          \`gh\` がなければ、下の Assets から \`.deb\` をダウンロードしてください。
+          \`SHA256SUMS\` でファイルを確かめられます (\`sha256sum -c SHA256SUMS\`)。
           NOTES
           # 0.x のうちはプレリリースとして出す。
           prerelease=""
           case "$GITHUB_REF_NAME" in v0.*) prerelease="--prerelease" ;; esac
-          gh release create "$GITHUB_REF_NAME" dist/*.deb dist/*.exe dist/SHA256SUMS \
+          gh release create "$GITHUB_REF_NAME" dist/*.deb dist/SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" \
             --title "hull-terminal $GITHUB_REF_NAME" \
             --notes-file notes.md \

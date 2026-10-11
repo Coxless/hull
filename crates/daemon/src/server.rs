@@ -25,7 +25,7 @@ const GOODBYE_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone)]
 pub struct Config {
-    /// 待ち受ける Unix ソケットのパス、または名前付きパイプの名前。
+    /// 待ち受ける Unix ソケットのパス。
     pub endpoint: String,
     /// 起動するシェル。`None` なら [`ShellSpec::detect`] で探す。
     pub shell: Option<ShellSpec>,
