@@ -28,7 +28,7 @@
     "targets": [
       "deb",
       "appimage",
-      "msi"
+      "nsis"
     ],
     "publisher": "Coxless",
     "homepage": "https://github.com/Coxless/hull",
