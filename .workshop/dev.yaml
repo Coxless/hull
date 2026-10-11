@@ -1,0 +1,63 @@
+# Workshop 定義ファイル (hull-terminal)
+# リファレンス: https://ubuntu.com/workshop/docs/reference/definition-files/workshop-definition/
+#
+# - name はファイル名 (.workshop/<name>.yaml) と一致させる
+# - base / sdks を変更したら `workshop refresh` で反映する
+# - actions の変更は refresh 不要 (即時反映)
+#
+# hull-terminal のビルド要件: Rust (デーモン / Tauri コア) / Node 22 LTS (フロント) / Tauri v2 のシステムライブラリ
+
+name: dev
+base: ubuntu@24.04   # ubuntu@22.04 / 24.04 / 26.04
+
+sdks:
+  - name: rust          # デーモン (crates/) と Tauri の Rust コア (app/src-tauri)
+  - name: node          # フロントエンド (React + TypeScript + Vite) と Tauri CLI
+    channel: 22/stable
+
+# ホストへのポート公開の例 (ワークショップ内の Vite 開発サーバーをホストの 127.0.0.1:5173 で見る)
+#  - name: system
+#    plugs:
+#      web:
+#        interface: tunnel
+#        endpoint: 127.0.0.1:5173
+
+# `workshop run -- <action> [引数...]` で実行する名前付きスクリプト。
+# bash (errexit + pipefail) で実行される。プロジェクトは /project にマウントされる。
+# ソースがまだない段階でも失敗しないよう、Cargo.toml / app/package.json があるときだけ実行する。
+actions:
+  setup: |
+    # Tauri v2 の前提パッケージ (WebKitGTK 4.1 など) と C ツールチェーン
+    sudo apt-get update
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+      git build-essential pkg-config curl wget file \
+      libwebkit2gtk-4.1-dev libxdo-dev libssl-dev \
+      libayatana-appindicator3-dev librsvg2-dev
+    cd /project
+    if [ -f Cargo.toml ]; then cargo fetch; fi
+    if [ -f app/package.json ]; then npm --prefix app install; fi
+
+  build: |
+    cd /project
+    cargo build --workspace "$@"
+    if [ -f app/package.json ]; then npm --prefix app run build; fi
+
+  package: |
+    # 配布パッケージ (.deb / AppImage) を target/release/bundle/ に出力する
+    cd /project/app
+    npm run tauri build -- "$@"
+
+  test: |
+    cd /project
+    cargo test --workspace "$@"
+    if [ -f app/package.json ]; then npm --prefix app test --if-present; fi
+
+  lint: |
+    cd /project
+    cargo clippy --workspace --all-targets -- -D warnings
+    if [ -f app/package.json ]; then (cd app && npx tsc --noEmit); fi
+
+  fmt: |
+    cd /project
+    cargo fmt --all
+    if [ -f app/package.json ]; then (cd app && npx prettier --write .); fi

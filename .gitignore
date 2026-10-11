@@ -1,0 +1,15 @@
+# Workshop: ロックファイルはリポジトリに含めてはいけない (定義 .workshop/*.yaml はコミットする)
+.workshop.lock
+
+# エディタ / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# 言語別の生成物
+node_modules/
+target/
+dist/
+build/
+.env
