@@ -1,4 +1,4 @@
-//! デーモンへの接続と、いないときの起動。
+//! デーモンへの接続と、いないときの起動。この OS で何が使えるかの確認もここで行う。
 
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -194,4 +194,26 @@ pub fn platform_warning() -> Option<String> {
 #[cfg(not(windows))]
 pub fn platform_warning() -> Option<String> {
     None
+}
+
+/// 画面を GPU で描けるか。描けない環境では、WebGL ではなく DOM で描く。
+///
+/// WebKitGTK は GPU がなくても WebGL をソフトウェアで動かすが、DOM 描画より重く、
+/// GPU での合成を切ってある (`WEBKIT_DISABLE_COMPOSITING_MODE`) と画面が正しく更新されない。
+/// GPU を扱えるドライバーは `/dev/dri/renderD*` を作るので、その有無で見分ける。
+#[cfg(target_os = "linux")]
+pub fn gpu_available() -> bool {
+    if std::env::var_os("WEBKIT_DISABLE_COMPOSITING_MODE")
+        .is_some_and(|v| !v.is_empty() && v != "0")
+    {
+        return false;
+    }
+    std::fs::read_dir("/dev/dri").is_ok_and(|entries| {
+        entries.flatten().any(|entry| entry.file_name().to_string_lossy().starts_with("renderD"))
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn gpu_available() -> bool {
+    true
 }

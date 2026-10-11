@@ -91,6 +91,9 @@ export function TerminalView({ onStatus }: Props) {
         if (status.state === "connecting") {
           update({ state: "running", pid: info.pid });
         }
+        // つないでいる途中で画面の大きさが変わると、その知らせはデーモンに届いていない。
+        // つながったあとで今の大きさを送り直す。
+        resize(term.cols, term.rows);
       } catch (error) {
         notice(`bash を起動できません: ${String(error)}`);
         notice("Enter でもう一度試します");
@@ -162,7 +165,7 @@ export function TerminalView({ onStatus }: Props) {
       term.onBinary((data) => send(Uint8Array.from(data, (char) => char.charCodeAt(0)))),
       term.onResize(({ cols, rows }) => {
         update({ cols, rows });
-        if (status.state === "running" || status.state === "connecting") {
+        if (status.state === "running") {
           resize(cols, rows);
         }
       }),
@@ -171,12 +174,38 @@ export function TerminalView({ onStatus }: Props) {
       }),
     ];
 
+    // WebGL の描画は、次に何かを描くまで画面に出ないことがある (WebKitGTK)。カーソルの点滅が
+    // 止まる非アクティブなウィンドウでは、最後の出力が出ないままになるので、描画が落ち着いたら
+    // もう一度だけ描き直して押し出す。
+    let flushTimer = 0;
+    let flushing = false;
+    subscriptions.push(
+      term.onRender(() => {
+        if (flushing || status.renderer !== "webgl") {
+          flushing = false;
+          return;
+        }
+        window.clearTimeout(flushTimer);
+        flushTimer = window.setTimeout(() => {
+          flushing = true;
+          term.refresh(0, term.rows - 1);
+        }, 40);
+      }),
+    );
+
     let frame = 0;
     const observer = new ResizeObserver(() => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => fit.fit());
     });
     observer.observe(element);
+
+    // フォントの読み込みが終わると文字の幅が変わることがあるので、列数を数え直す。
+    void document.fonts.ready.then(() => {
+      if (!disposed) {
+        fit.fit();
+      }
+    });
 
     const focus = () => term.focus();
     window.addEventListener("focus", focus);
@@ -202,6 +231,7 @@ export function TerminalView({ onStatus }: Props) {
       disposed = true;
       observer.disconnect();
       cancelAnimationFrame(frame);
+      window.clearTimeout(flushTimer);
       window.removeEventListener("focus", focus);
       element.removeEventListener("contextmenu", blockContextMenu);
       for (const subscription of subscriptions) {
@@ -216,6 +246,9 @@ export function TerminalView({ onStatus }: Props) {
 
 /**
  * GPU (WebGL) で描く。使えない環境や、途中で GPU のコンテキストを失ったときは DOM 描画にする。
+ *
+ * GPU があるかどうかは画面側からは見分けられない (WebKit は描画デバイスの名前を隠す) ので、
+ * Rust コアが調べて、GPU がなければ `preference` に `dom` を入れてくる。
  */
 function enableRenderer(
   term: Terminal,

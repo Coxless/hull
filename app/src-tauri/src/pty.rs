@@ -130,18 +130,22 @@ pub struct AttachInfo {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppOptions {
-    /// 描画方法の指定 (`webgl` / `dom`)。未指定なら WebGL を試し、使えなければ DOM にする。
+    /// 描画方法 (`webgl` / `dom`)。`None` なら WebGL を試し、使えなければ DOM にする。
     renderer: Option<String>,
     /// この OS では動かないなどの警告。
     warning: Option<String>,
 }
 
+/// 描画方法を指定する環境変数 (`webgl` / `dom`)。
+const RENDERER_ENV: &str = "HULL_TERMINAL_RENDERER";
+
 #[tauri::command]
 pub fn app_options() -> AppOptions {
-    AppOptions {
-        renderer: std::env::var("HULL_TERMINAL_RENDERER").ok().filter(|v| !v.is_empty()),
-        warning: daemon::platform_warning(),
-    }
+    let renderer = std::env::var(RENDERER_ENV)
+        .ok()
+        .filter(|v| !v.is_empty())
+        .or_else(|| (!daemon::gpu_available()).then(|| "dom".to_string()));
+    AppOptions { renderer, warning: daemon::platform_warning() }
 }
 
 /// デーモンに接続し (いなければ起動し)、画面をつなぐ。
