@@ -1,5 +1,8 @@
 //! 結合テスト用の小さなクライアント。
 
+// テストのファイルごとに使う部品が違うので、使われないものがあってよい。
+#![allow(dead_code)]
+
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
@@ -19,7 +22,7 @@ pub const TIMEOUT: Duration = Duration::from_secs(60);
 pub struct Daemon {
     pub endpoint: String,
     pub handle: JoinHandle<anyhow::Result<u32>>,
-    _dir: tempfile::TempDir,
+    dir: tempfile::TempDir,
 }
 
 /// テストごとに別の接続先でデーモンを起動する。
@@ -31,7 +34,34 @@ pub fn start_daemon_with(ring_capacity: usize) -> Daemon {
     let dir = tempfile::tempdir().unwrap();
     let endpoint = test_endpoint(&dir);
     let config = Config { endpoint: endpoint.clone(), shell: Some(test_shell()), ring_capacity };
-    Daemon { endpoint, handle: tokio::spawn(run(config)), _dir: dir }
+    Daemon { endpoint, handle: tokio::spawn(run(config)), dir }
+}
+
+/// 統合スクリプトを読み込む bash で、デーモンを起動する。
+///
+/// 開発者の設定に左右されないよう、ホームディレクトリを空の場所に移し、
+/// そこに `bashrc` の内容の `.bashrc` を置く。
+pub fn start_integrated_daemon(bashrc: &str) -> Daemon {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    std::fs::create_dir(&home).unwrap();
+    std::fs::write(home.join(".bashrc"), bashrc).unwrap();
+
+    let mut shell = ShellSpec::detect().expect("bash が見つかりません");
+    shell.args = vec!["--noprofile".into(), "-i".into()];
+    shell.env = vec![("HOME".into(), home.to_string_lossy().into_owned())];
+
+    let endpoint = test_endpoint(&dir);
+    let config =
+        Config { endpoint: endpoint.clone(), shell: Some(shell), ring_capacity: 1024 * 1024 };
+    Daemon { endpoint, handle: tokio::spawn(run(config)), dir }
+}
+
+impl Daemon {
+    /// テスト用のホームディレクトリ ([`start_integrated_daemon`] で起動したとき)。
+    pub fn home(&self) -> std::path::PathBuf {
+        self.dir.path().join("home")
+    }
 }
 
 pub fn test_endpoint(dir: &tempfile::TempDir) -> String {
@@ -106,6 +136,11 @@ impl Client {
     /// 1行ぶんのキー入力を送る (Enter は CR)。
     pub async fn type_line(&mut self, line: &str) {
         self.send(ClientMessage::Input { data: format!("{line}\r").into_bytes() }).await;
+    }
+
+    /// キー入力のバイト列をそのまま送る。
+    pub async fn send_bytes(&mut self, data: &[u8]) {
+        self.send(ClientMessage::Input { data: data.to_vec() }).await;
     }
 
     pub async fn next_message(&mut self) -> Option<ServerMessage> {

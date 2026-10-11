@@ -5,6 +5,7 @@ use anyhow::Context;
 use portable_pty::{native_pty_system, MasterPty, PtySize};
 use tokio::sync::{mpsc, oneshot};
 
+use crate::integration::Integration;
 use crate::{Ring, ShellSpec};
 
 /// 1クライアントぶんの待ち行列の長さ (チャンク数)。
@@ -53,13 +54,18 @@ pub(crate) struct SessionEnd {
 }
 
 impl Session {
-    pub fn spawn(shell: &ShellSpec, ring_capacity: usize) -> anyhow::Result<(Self, SessionEnd)> {
+    /// `integration` を渡すと、統合スクリプトを読み込ませて bash を起動する。
+    pub fn spawn(
+        shell: &ShellSpec,
+        ring_capacity: usize,
+        integration: Option<&Integration>,
+    ) -> anyhow::Result<(Self, SessionEnd)> {
         let pair = native_pty_system()
             .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
             .context("PTY を開けません")?;
         let mut child = pair
             .slave
-            .spawn_command(shell.command())
+            .spawn_command(shell.command(integration))
             .with_context(|| format!("{} を起動できません", shell.program.display()))?;
         // 子プロセス側の端を持ち続けると、bash が終わっても読み取りが終わらない。
         drop(pair.slave);

@@ -3,6 +3,7 @@
 //! UI とは別プロセスなので、ウィンドウを閉じても bash は生き続ける。
 //! bash が終わったらデーモンも終わる。
 
+mod integration;
 mod ring;
 mod server;
 mod session;
