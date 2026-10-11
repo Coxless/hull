@@ -2,6 +2,7 @@ name: CI
 
 on:
   push:
+    branches: ["**"]
   workflow_dispatch:
 
 concurrency:
@@ -73,3 +74,8 @@ jobs:
       # --nocapture は、ConPTY を通して OSC 133 が届くかの記録を表示するため。
       - name: テスト
         run: cargo test --workspace -- --nocapture
+
+  # 配布パッケージ (.deb) を作り、入れて起動できることを確かめる。成果物は Artifacts から取れる。
+  package:
+    name: Package
+    uses: ./.github/workflows/package.yml

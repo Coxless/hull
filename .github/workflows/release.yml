@@ -1,0 +1,70 @@
+# `v0.1.0` のようなタグを push すると、.deb を作って GitHub Releases に公開する。
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# タグの版は Cargo.toml の [workspace.package] の version と同じにする。
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  version:
+    name: 版の確認
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: タグと Cargo.toml の版が合っているか
+        run: |
+          version=$(sed -n '/^\[workspace\.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
+          echo "Cargo.toml: $version / タグ: $GITHUB_REF_NAME"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::タグ $GITHUB_REF_NAME が Cargo.toml の版 $version と合いません"
+            exit 1
+          fi
+
+  package:
+    needs: version
+    uses: ./.github/workflows/package.yml
+
+  publish:
+    name: GitHub Releases に公開
+    needs: package
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: hull-terminal-deb
+          path: dist
+
+      - name: リリースを作る
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la dist
+          cat > notes.md <<NOTES
+          ## インストール (Ubuntu 24.04 以降)
+
+          \`\`\`bash
+          gh release download $GITHUB_REF_NAME -R $GITHUB_REPOSITORY -p '*.deb'
+          sudo apt install ./hull-terminal_${GITHUB_REF_NAME#v}_amd64.deb
+          hull-terminal
+          \`\`\`
+
+          \`gh\` がなければ、下の Assets から \`.deb\` をダウンロードしてください。
+          \`SHA256SUMS\` でファイルを確かめられます (\`sha256sum -c SHA256SUMS\`)。
+
+          Windows 向けのパッケージはまだありません。
+          NOTES
+          # 0.x のうちはプレリリースとして出す。
+          prerelease=""
+          case "$GITHUB_REF_NAME" in v0.*) prerelease="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" dist/*.deb dist/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "hull-terminal $GITHUB_REF_NAME" \
+            --notes-file notes.md \
+            --generate-notes \
+            $prerelease
