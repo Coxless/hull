@@ -1,0 +1,3 @@
+#!/bin/sh
+# `hull` と打っても起動できるようにする短い名前。.deb が /usr/bin/hull として入れる。
+exec /usr/bin/hull-terminal "$@"
