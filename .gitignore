@@ -13,3 +13,7 @@ target/
 dist/
 build/
 .env
+
+# Tauri が生成するもの
+app/src-tauri/gen/
+app/src-tauri/binaries/

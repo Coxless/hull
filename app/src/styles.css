@@ -1,0 +1,73 @@
+:root {
+  --bg: #1a1714;
+  --bar: #14110f;
+  --border: #2e2823;
+  --text: #9a8f83;
+  --accent: #ff8a3d;
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.terminal-host {
+  flex: 1;
+  min-height: 0;
+  padding: 6px 4px 0 8px;
+}
+
+.terminal-host .xterm {
+  height: 100%;
+}
+
+.statusbar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  height: 22px;
+  padding: 0 10px;
+  border-top: 1px solid var(--border);
+  background: var(--bar);
+  color: var(--text);
+  font:
+    11px/1 system-ui,
+    "BIZ UDGothic",
+    sans-serif;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.statusbar-spacer {
+  flex: 1;
+}
+
+.statusbar-state::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--text);
+}
+
+.statusbar[data-state="running"] .statusbar-state::before {
+  background: var(--accent);
+}
+
+/* 行数で割り切れない余りの部分が、xterm.js の既定の黒で塗られないようにする。 */
+.terminal-host .xterm .xterm-viewport {
+  background-color: var(--bg) !important;
+}

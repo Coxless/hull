@@ -39,25 +39,29 @@ actions:
 
   build: |
     cd /project
-    cargo build --workspace "$@"
+    # Tauri のビルドがフロントの成果物 (app/dist) を取り込むので、先にフロントを作る
     if [ -f app/package.json ]; then npm --prefix app run build; fi
+    cargo build --workspace "$@"
 
   package: |
-    # 配布パッケージ (.deb / AppImage) を target/release/bundle/ に出力する
+    # デーモンを同梱した配布パッケージを target/release/bundle/ に出力する。
+    # 例: `workshop run -- package --bundles deb`
     cd /project/app
-    npm run tauri build -- "$@"
+    npm run bundle -- "$@"
 
   test: |
+    # デーモンを起動して bash を操作する結合テストを含む
     cd /project
+    if [ -f app/package.json ] && [ ! -d app/dist ]; then npm --prefix app run build; fi
     cargo test --workspace "$@"
-    if [ -f app/package.json ]; then npm --prefix app test --if-present; fi
 
   lint: |
     cd /project
+    if [ -f app/package.json ] && [ ! -d app/dist ]; then npm --prefix app run build; fi
     cargo clippy --workspace --all-targets -- -D warnings
-    if [ -f app/package.json ]; then (cd app && npx tsc --noEmit); fi
+    if [ -f app/package.json ]; then npm --prefix app run typecheck; fi
 
   fmt: |
     cd /project
     cargo fmt --all
-    if [ -f app/package.json ]; then (cd app && npx prettier --write .); fi
+    if [ -f app/package.json ]; then npm --prefix app run format; fi

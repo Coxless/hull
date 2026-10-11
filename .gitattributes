@@ -1,0 +1,5 @@
+# Windows でも改行を LF にそろえる (prettier と rustfmt の検査のため)
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.icns binary

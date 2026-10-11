@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Ubuntu
+            os: ubuntu-24.04
+          - name: Windows
+            os: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tauri の前提パッケージ (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential pkg-config curl wget file \
+            libwebkit2gtk-4.1-dev libxdo-dev libssl-dev \
+            libayatana-appindicator3-dev librsvg2-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: フロントの依存を入れる
+        working-directory: app
+        run: npm ci
+
+      - name: フロントの整形を確かめる
+        working-directory: app
+        run: npm run format:check
+
+      # Tauri のビルドがフロントの成果物 (app/dist) を取り込むので、Rust より先に作る。
+      - name: フロントの型検査とビルド
+        working-directory: app
+        run: npm run build
+
+      - name: Rust の整形を確かめる
+        run: cargo fmt --all --check
+
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: ビルド
+        run: cargo build --workspace
+
+      # デーモンを実際に起動し、ソケット (Windows は名前付きパイプ) 越しに bash を操作する結合テストを含む。
+      # --nocapture は、ConPTY を通して OSC 133 が届くかの記録を表示するため。
+      - name: テスト
+        run: cargo test --workspace -- --nocapture

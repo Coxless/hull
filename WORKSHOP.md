@@ -9,6 +9,8 @@
 hull-terminal/
 ├── .workshop/
 │   └── dev.yaml    # Workshop 定義 (Rust / Node 22 + actions)
+├── crates/         # protocol (メッセージ定義) と daemon (PTY を持つデーモン)
+├── app/            # Tauri アプリ (フロントと Rust コア)
 ├── docs/           # 要件定義と Phase ごとの実行計画
 ├── .gitignore
 └── WORKSHOP.md     # この説明
@@ -51,8 +53,8 @@ workshop run -- setup      # Tauri の前提パッケージを入れ、`cargo fe
 | --------- | ------------------------------------------------- | ------------------------- |
 | `setup`   | システム依存の導入、`cargo fetch`、`npm install`  | `workshop run -- setup`   |
 | `build`   | `cargo build --workspace` とフロントのビルド      | `workshop run -- build`   |
-| `package` | `tauri build` で配布パッケージを作成              | `workshop run -- package` |
-| `test`    | `cargo test --workspace` と `npm test`            | `workshop run -- test`    |
+| `package` | デーモンを同梱した配布パッケージを作成          | `workshop run -- package --bundles deb` |
+| `test`    | `cargo test --workspace` (bash を操作する結合テストを含む) | `workshop run -- test`    |
 | `lint`    | `cargo clippy` と `tsc --noEmit`                  | `workshop run -- lint`    |
 | `fmt`     | `cargo fmt` と prettier                           | `workshop run -- fmt`     |
 
@@ -62,7 +64,20 @@ workshop run -- setup      # Tauri の前提パッケージを入れ、`cargo fe
 ### 3. アプリの起動について
 
 `tauri dev` はウィンドウを開くため、ディスプレイのないワークショップ内ではそのままでは動きません。
-ワークショップではビルド・テスト・パッケージングを行い、画面の動作確認 (日本語入力や WebGL を含む) はホストで実行してください。
+画面の動作確認 (日本語入力や WebGL を含む) は、次のどちらかで行います。
+
+- ホストに Rust と Node を入れて、`app/` で `npm install` のあと `npm run tauri dev` を実行する
+  (デーモンのビルドと Vite の起動も一緒に行われます)
+- ワークショップで `workshop run -- package --bundles deb` を実行し、`target/release/bundle/deb/` にできた
+  `.deb` をホストに入れて `hull-terminal` を起動する
+
+デーモンだけを試すには、テスト用の小さなクライアントが使えます。
+
+```bash
+cargo run -p hull-terminal-daemon &
+cargo run -p hull-terminal-daemon --example hull-ctl -- 'echo hello'
+cargo run -p hull-terminal-daemon --example hull-ctl -- exit
+```
 
 ### 4. 定義を変更したとき
 
