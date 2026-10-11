@@ -78,7 +78,7 @@ jobs:
       - name: テスト
         run: cargo test --workspace -- --nocapture
 
-  # 配布パッケージ (.deb) を作り、入れて起動できることを確かめる。成果物は Artifacts から取れる。
+  # 配布パッケージ (.deb と Windows のインストーラー) を作り、入れて起動できることを確かめる。成果物は Artifacts から取れる。
   package:
     name: Package
     uses: ./.github/workflows/package.yml
