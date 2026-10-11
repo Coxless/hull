@@ -4,6 +4,7 @@ description = "コマンドと出力をブロックとして扱うチャット�
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 
 [lib]
 name = "hull_terminal_lib"

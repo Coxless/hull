@@ -6,6 +6,7 @@ members = ["crates/protocol", "crates/daemon", "app/src-tauri"]
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.85"
+license = "MIT"
 
 [workspace.dependencies]
 hull-terminal-protocol = { path = "crates/protocol" }

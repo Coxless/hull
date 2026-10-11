@@ -32,6 +32,7 @@
     ],
     "publisher": "Coxless",
     "homepage": "https://github.com/Coxless/hull",
+    "license": "MIT",
     "category": "DeveloperTool",
     "shortDescription": "コマンドと出力をブロックとして扱うチャット履歴型のターミナル",
     "longDescription": "ウィンドウを閉じても bash が残り、開き直すと同じ bash につながるターミナル。\nPTY を持つデーモン (hull-terminal-daemon) を同梱する。",

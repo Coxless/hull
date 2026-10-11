@@ -4,6 +4,7 @@ description = "hull-terminal の UI とデーモンが共有するメッセー�
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 
 [dependencies]
 interprocess.workspace = true

@@ -4,6 +4,7 @@ description = "hull-terminal の PTY を持つ管理デーモン"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 
 [dependencies]
 anyhow = "1"

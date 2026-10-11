@@ -64,3 +64,7 @@ git push origin v0.1.0
 ```
 
 ブランチへの push では、CI が同じ `.deb` を作って検査し、Actions の Artifacts に置きます (公開はしません)。
+
+## ライセンス
+
+[MIT](LICENSE)
