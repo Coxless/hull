@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -12,6 +13,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio::time::timeout;
 
+use crate::integration::Integration;
 use crate::session::{ClientEvent, Session};
 use crate::{ShellSpec, DEFAULT_RING_CAPACITY};
 
@@ -50,7 +52,8 @@ pub async fn run(config: Config) -> anyhow::Result<u32> {
         Some(shell) => shell,
         None => ShellSpec::detect()?,
     };
-    let (session, mut end) = Session::spawn(&shell, config.ring_capacity)?;
+    let integration = if shell.integration { install_integration(&config.endpoint) } else { None };
+    let (session, mut end) = Session::spawn(&shell, config.ring_capacity, integration.as_ref())?;
     let session = Arc::new(session);
 
     let mut clients = JoinSet::new();
@@ -77,6 +80,20 @@ pub async fn run(config: Config) -> anyhow::Result<u32> {
     session.announce_exit(code).await;
     let _ = timeout(GOODBYE_TIMEOUT, async { while clients.join_next().await.is_some() {} }).await;
     Ok(code)
+}
+
+/// 統合スクリプトを、ソケットと同じディレクトリに書き出す。
+///
+/// 書けなくても bash は起動する (合図が出ないので、コマンドの区切りはわからない)。
+fn install_integration(endpoint: &str) -> Option<Integration> {
+    let dir = Path::new(endpoint).parent()?;
+    match Integration::install(dir) {
+        Ok(integration) => Some(integration),
+        Err(e) => {
+            eprintln!("統合スクリプトを用意できません: {e:#}");
+            None
+        }
+    }
 }
 
 async fn serve_client(recv: LocalRecvHalf, send: LocalSendHalf, session: Arc<Session>) {
