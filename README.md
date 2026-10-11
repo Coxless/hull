@@ -17,7 +17,7 @@
 ```bash
 gh release download -R Coxless/hull -p '*.deb'   # 最新版。gh がなければ Releases のページからダウンロード
 sudo apt install ./hull-terminal_*_amd64.deb
-hull-terminal                                    # アプリの一覧からも起動できます
+hull                                             # hull-terminal でも、アプリの一覧からも起動できます
 ```
 
 更新は、新しい `.deb` を同じ手順で入れ直します。開いているセッションは、先に `exit` で終了してください
@@ -53,17 +53,39 @@ workshop run -- lint
 workshop run -- package --bundles deb
 ```
 
+### 開発の流れ (GitHub Flow)
+
+`main` はいつでもリリースできる状態に保ち、変更はすべてプルリクエストで入れます。
+
+1. `main` から作業ブランチを切る (名前は内容がわかるものにする。例: `fix-resize-flicker`)
+2. コミットして push し、`main` へのプルリクエストを作る
+3. CI (整形・clippy・テストと、`.deb` を作って入れて起動する検査) が通ったらマージする
+4. マージしたブランチは消す
+
+```bash
+git switch main && git pull
+git switch -c fix-resize-flicker
+# ... 変更してコミット ...
+git push -u origin fix-resize-flicker
+gh pr create --fill
+gh pr merge --squash --delete-branch   # CI が通ってから
+```
+
+プルリクエストでは、CI が作った `.deb` を Actions の Artifacts から取って試せます (公開はしません)。
+
 ## リリース
 
-`Cargo.toml` の `[workspace.package]` の `version` を上げてコミットし、同じ版のタグを push します。
+`Cargo.toml` の `[workspace.package]` の `version` を上げる変更も、プルリクエストで `main` に入れます。
+マージしたあと、`main` のそのコミットに同じ版のタグを付けて push します。
 GitHub Actions が `.deb` を作り、入れて起動できることを確かめてから、Releases に公開します。
 
 ```bash
+git switch main && git pull
 git tag v0.1.0
 git push origin v0.1.0
 ```
 
-ブランチへの push では、CI が同じ `.deb` を作って検査し、Actions の Artifacts に置きます (公開はしません)。
+`main` にないコミットに付けたタグや、`Cargo.toml` と版が合わないタグは公開されません。
 
 ## ライセンス
 

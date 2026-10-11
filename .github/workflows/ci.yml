@@ -1,13 +1,16 @@
 name: CI
 
+# GitHub Flow: 作業ブランチはプルリクエストで検査し、main はマージされた結果を検査する。
 on:
+  pull_request:
   push:
-    branches: ["**"]
+    branches: [main]
   workflow_dispatch:
 
+# プルリクエストでは、新しい push が来たら古い検査を止める。main の検査は最後まで走らせる。
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
