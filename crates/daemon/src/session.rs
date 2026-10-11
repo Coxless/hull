@@ -15,6 +15,26 @@ const CLIENT_QUEUE: usize = 256;
 
 const READ_BUF: usize = 64 * 1024;
 
+/// カーソル位置の問い合わせ (DSR) と、その応答 (1行1列)。
+const CURSOR_QUERY: &[u8] = b"\x1b[6n";
+const CURSOR_AT_HOME: &[u8] = b"\x1b[1;1R";
+
+/// ConPTY は起動直後にカーソル位置を問い合わせ、応答が来るまで bash の出力を流さない。
+/// UI がつながる前に問い合わせが出ると誰も応えられないので、デーモンが代わりに応える。
+/// アプリが出す問い合わせは ConPTY が自分で処理するので、ここに届くのは起動時の1回だけ。
+const ANSWER_STARTUP_CURSOR_QUERY: bool = cfg!(windows);
+
+/// `chunk` にカーソル位置の問い合わせがあれば取り除き、あったかどうかを返す。
+fn take_cursor_query(chunk: &mut Vec<u8>) -> bool {
+    match chunk.windows(CURSOR_QUERY.len()).position(|window| window == CURSOR_QUERY) {
+        Some(pos) => {
+            chunk.drain(pos..pos + CURSOR_QUERY.len());
+            true
+        }
+        None => false,
+    }
+}
+
 /// セッションからクライアントへ流すもの。
 #[derive(Debug)]
 pub(crate) enum ClientEvent {
@@ -74,17 +94,29 @@ impl Session {
             exited: None,
         }));
 
+        let (input, input_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+
         // PTY の読み書きはブロッキングなので、専用のスレッドで行う。
         let (drained_tx, drained) = oneshot::channel();
         let reader_shared = Arc::clone(&shared);
+        let reader_input = input.clone();
         std::thread::Builder::new().name("pty-reader".into()).spawn(move || {
             let mut buf = vec![0u8; READ_BUF];
+            let mut awaiting_cursor_query = ANSWER_STARTUP_CURSOR_QUERY;
             loop {
                 let n = match reader.read(&mut buf) {
                     Ok(0) | Err(_) => break,
                     Ok(n) => n,
                 };
-                let chunk: Arc<[u8]> = Arc::from(&buf[..n]);
+                let mut chunk = buf[..n].to_vec();
+                if awaiting_cursor_query && take_cursor_query(&mut chunk) {
+                    awaiting_cursor_query = false;
+                    let _ = reader_input.send(CURSOR_AT_HOME.to_vec());
+                    if chunk.is_empty() {
+                        continue;
+                    }
+                }
+                let chunk: Arc<[u8]> = Arc::from(chunk);
                 // リングへの追記と宛先の確定を同じロックの中で行い、
                 // attach と競合しても抜けや重なりが出ないようにする。
                 let clients = {
@@ -100,7 +132,6 @@ impl Session {
             let _ = drained_tx.send(());
         })?;
 
-        let (input, input_rx) = std::sync::mpsc::channel::<Vec<u8>>();
         std::thread::Builder::new().name("pty-writer".into()).spawn(move || {
             for data in input_rx {
                 if writer.write_all(&data).and_then(|()| writer.flush()).is_err() {
@@ -169,4 +200,24 @@ impl Session {
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn take_cursor_query_removes_only_the_query() {
+        let mut chunk = b"\x1b[?9001h\x1b[6n\x1b[?1004h".to_vec();
+        assert!(take_cursor_query(&mut chunk));
+        assert_eq!(chunk, b"\x1b[?9001h\x1b[?1004h");
+
+        let mut chunk = b"\x1b[6n".to_vec();
+        assert!(take_cursor_query(&mut chunk));
+        assert!(chunk.is_empty());
+
+        let mut chunk = b"plain \x1b[6 output".to_vec();
+        assert!(!take_cursor_query(&mut chunk));
+        assert_eq!(chunk, b"plain \x1b[6 output");
+    }
 }
