@@ -1,5 +1,5 @@
 # Ubuntu 向けの配布パッケージ (.deb) を作り、入れて起動できることを確かめる。
-# CI (毎回の push) とリリース (タグの push) の両方から呼ばれる。
+# CI (プルリクエストと main への push) とリリース (タグの push) の両方から呼ばれる。
 name: Package
 
 on:
@@ -56,10 +56,12 @@ jobs:
           sudo apt-get install -y xvfb dbus-x11 ./target/release/bundle/deb/*.deb
           test -x /usr/bin/hull-terminal
           test -x /usr/bin/hull-terminal-daemon
+          test -x /usr/bin/hull
 
           export XDG_RUNTIME_DIR="$RUNNER_TEMP/xdg"
           mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
-          dbus-run-session -- xvfb-run -a hull-terminal > "$RUNNER_TEMP/app.log" 2>&1 &
+          # 短い名前の `hull` から起動する (中で hull-terminal に置き換わる)。
+          dbus-run-session -- xvfb-run -a hull > "$RUNNER_TEMP/app.log" 2>&1 &
 
           # アプリがデーモンを起動し、デーモンが bash を起動するまで待つ。
           for _ in $(seq 1 60); do

@@ -69,7 +69,7 @@ workshop run -- setup      # Tauri の前提パッケージを入れ、`cargo fe
 - ホストに Rust と Node を入れて、`app/` で `npm install` のあと `npm run tauri dev` を実行する
   (デーモンのビルドと Vite の起動も一緒に行われます)
 - ワークショップで `workshop run -- package --bundles deb` を実行し、`target/release/bundle/deb/` にできた
-  `.deb` をホストに入れて `hull-terminal` を起動する
+  `.deb` をホストに入れて `hull` (または `hull-terminal`) を起動する
 
 デーモンだけを試すには、テスト用の小さなクライアントが使えます。
 
