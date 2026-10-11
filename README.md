@@ -5,10 +5,7 @@
 いまは Phase 1 (v0.1) で、ブロック表示はまだなく、**ウィンドウを閉じても bash が残る普通のターミナル**として動きます。
 設計と計画は [docs/concept.md](docs/concept.md) と [docs/phases/phase1.md](docs/phases/phase1.md) にあります。
 
-| OS | 状態 |
-| --- | --- |
-| Ubuntu 24.04 以降 | `.deb` を配布。Ubuntu 24.04 / 26.04 で動作を確認 |
-| Windows 10 / 11 | インストーラーを配布。CI で入れて起動できることを確認。実機では未確認 |
+Ubuntu 24.04 以降で動きます (24.04 / 26.04 で動作を確認)。シェルは bash だけに対応しています。
 
 ## インストール (Ubuntu)
 
@@ -24,15 +21,6 @@ hull                                             # hull-terminal でも、アプ
 (古い版のデーモンが残っていると、新しい版の画面とつながらないことがあります)。
 
 削除は `sudo apt remove hull-terminal` です。
-
-## インストール (Windows)
-
-先に [Git for Windows](https://gitforwindows.org/) を入れます (Git Bash を使います)。
-[Releases](https://github.com/Coxless/hull/releases) から `hull-terminal_<版>_x64-setup.exe` をダウンロードして実行し、
-スタートメニューの hull-terminal から起動します。
-
-インストーラーには署名がないので、実行時に Windows の警告 (SmartScreen) が出ます。
-削除は、Windows の「インストールされているアプリ」から行います。
 
 ## 使い方
 
@@ -80,13 +68,13 @@ gh pr create --fill
 gh pr merge --squash --delete-branch   # CI が通ってから
 ```
 
-プルリクエストでは、CI が作った `.deb` と Windows のインストーラーを Actions の Artifacts から取って試せます (公開はしません)。
+プルリクエストでは、CI が作った `.deb` を Actions の Artifacts から取って試せます (公開はしません)。
 
 ## リリース
 
 `Cargo.toml` の `[workspace.package]` の `version` を上げる変更も、プルリクエストで `main` に入れます。
 マージしたあと、`main` のそのコミットに同じ版のタグを付けて push します。
-GitHub Actions が `.deb` と Windows のインストーラーを作り、それぞれ入れて起動できることを確かめてから、Releases に公開します。
+GitHub Actions が `.deb` を作り、入れて起動できることを確かめてから、Releases に公開します。
 
 ```bash
 git switch main && git pull

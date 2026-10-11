@@ -16,12 +16,12 @@ hull-terminal は、コマンドと出力を1往復ずつブロックとして�
  
 ## 対象範囲
  
-対象は Windows の Git Bash と Ubuntu の bash の2つだけです。開発と動作確認は主に Ubuntu で行います。
+対象は Ubuntu の bash だけです。Windows（Git Bash）にも対応する計画でしたが、Oct 12, 2026 にやめました。
  
 | 項目 | 対象 | 対象外 |
 | --- | --- | --- |
-| OS | Windows 10/11、Ubuntu | macOS |
-| シェル | bash（Git Bash、Ubuntu の bash） | PowerShell、cmd、zsh、fish |
+| OS | Ubuntu | Windows、macOS |
+| シェル | bash | zsh、fish |
 | ウィンドウ | 1ウィンドウに1セッション。切り替えはサイドバーで行う | タブ、画面分割 |
 | 互換性 | 自分の使い方で困らないこと | 既存ターミナルとの設定や操作の互換 |
 | 連携 | なし | ブラウザ・Slack 連携（検討のうえ外した） |
@@ -94,8 +94,8 @@ flowchart TB
     SM --- PARSE
     PARSE --> DB
   end
-  CORE <-->|"Unix ソケット / 名前付きパイプ"| SM
-  SM -->|PTY| BASH["bash + 統合スクリプト<br/>（Ubuntu / Git Bash）"]
+  CORE <-->|"Unix ソケット"| SM
+  SM -->|PTY| BASH["bash + 統合スクリプト"]
 ```
  
 **デーモンの起動**：アプリを開いたときにデーモンがいなければ起動します。ログイン時の自動起動はしません。休止中のセッションがなくなれば、デーモンも終了します。
@@ -125,14 +125,14 @@ UI は Tauri v2 + React、デーモンは Rust で作ります。言語は TypeS
 | 実行中ブロックの表示 | xterm.js（@xterm/xterm、WebGL アドオン） | VS Code でも使われる成熟したターミナル。Claude Code や vim が動く |
 | 終了ブロックの表示 | @xterm/headless + @xterm/addon-serialize | カーソル移動や上書きを正しく反映した色付き HTML を作れる |
 | デーモンの基盤 | Rust + tokio | 多数の PTY と接続を非同期で扱う |
-| PTY | portable-pty | WezTerm 由来。ConPTY と Linux の PTY を同じコードで扱える |
+| PTY | portable-pty | WezTerm 由来。PTY の扱いを任せられる |
 | 制御シーケンス解析 | vte（crate） | Alacritty 由来のパーサ。OSC 133 / 7 / 9 を拾うのに使う |
-| UI とデーモンの通信 | interprocess（Unix ソケット / 名前付きパイプ）+ 長さ付きフレームの MessagePack | 両 OS で同じ書き方になる。出力はバイナリのまま流せる |
+| UI とデーモンの通信 | interprocess（Unix ソケット）+ 長さ付きフレームの MessagePack | 出力はバイナリのまま流せる |
 | 保存 | SQLite（rusqlite、bundled）+ zstd 圧縮 | 1ファイルで扱いやすく、履歴検索も SQL でできる |
-| メモリ監視 | sysinfo | プロセスツリーごとのメモリを両 OS で取れる |
+| メモリ監視 | sysinfo | プロセスツリーごとのメモリを取れる |
 | 設定 | YAML（後から Lua を mlua で追加） | 設定の章を参照 |
-| 配布 | Tauri のバンドラー（.msi / .deb / AppImage）+ GitHub Releases | 公開時にそのまま使える |
-| CI | GitHub Actions（Windows / Ubuntu の両方でビルドとテスト） | Ubuntu で開発しても Windows の壊れに気づける |
+| 配布 | Tauri のバンドラー（.deb / AppImage）+ GitHub Releases | 公開時にそのまま使える |
+| CI | GitHub Actions（Ubuntu でビルドとテスト） | プルリクエストごとに壊れに気づける |
  
 Ubuntu では Tauri の画面が WebKitGTK で動きます。日本語入力や描画で致命的な問題が出た場合は、画面層だけ Electron に移す逃げ道を残します。デーモンが分かれているので、移すのはフロントと通信部分だけで済みます。
  
@@ -157,7 +157,7 @@ Ubuntu では Tauri の画面が WebKitGTK で動きます。日本語入力や�
 - 1ブロックにつき最大 10MB。超えた分は先頭と末尾を残して間を省き、「省略した」と記録する
 - 全体で 2GB を超えたら、古いセッションの出力から消す。ピン留めしたセッションは消さない
 - 出力を消しても、コマンドや終了コードなどの記録は残す
-保存場所：Ubuntu は `~/.local/share/hull-terminal/`、Windows は `%APPDATA%\hull-terminal\` を想定しています。
+保存場所：`~/.local/share/hull-terminal/` を想定しています。
  
 ## 設定
  
@@ -165,8 +165,6 @@ MVP は YAML の設定ファイル1つで始め、後から Lua で動きを拡�
  
 ```yaml
 # ~/.config/hull-terminal/config.yaml
-shell:
-  windows: "C:/Program Files/Git/bin/bash.exe"  # 省略時は自動検出
 session:
   keep_limit: 5            # プロセス保持の上限
   grace_minutes: 5         # 保持オフでも残す猶予
@@ -197,8 +195,7 @@ MVP のゴールは「Ubuntu で毎日の作業と Claude Code が hull-terminal
 | 3. 保存と履歴 | SQLite 保存、サイドバー、終了セッションの再開、検索 | 昨日のセッションを開いて続きが打てる |
 | 4. 休止中 | ピン留め、プロセス保持、上限、確認ダイアログ、メモリ表示 | ウィンドウを閉じても npm run dev が生きている |
 | 5. Claude Code | 入力待ちバッジ、キーの素通しの確認、`claude --continue` の提案 | Claude Code で一日作業できる |
-| 6. Windows | Git Bash の検出、ConPTY での動作確認、名前付きパイプ | Windows でも Phase 5 までが動く |
-| 7. 公開 | 設定ファイル、インストーラー、README、GitHub Releases | 他の人が入れて使える |
+| 6. 公開 | 設定ファイル、インストーラー、README、GitHub Releases | 他の人が入れて使える |
  
 MVP の後に検討するもの：Lua による拡張、演出（アニメーションやテーマ）、ブロックのピン留めと共有、bash に問い合わせる補完。
  
@@ -218,5 +215,4 @@ MVP の後に検討するもの：Lua による拡張、演出（アニメーシ
 | プロンプトやコマンド表示の取り除きが崩れ、ブロックに余計な文字が混ざる | Phase 2 で最優先に検証する。崩れたときに生の出力を見られるデバッグ表示を用意する |
 | Claude Code など全画面でない TUI が、ブロックの幅や高さの変化で表示が乱れる | 実行中ブロックには画面いっぱいの高さを与え、サイズ変更を PTY に正しく伝える |
 | WebKitGTK（Ubuntu）での日本語入力や描画の不具合 | Phase 1 で早めに確認。だめなら画面層を Electron に移す |
-| ConPTY が制御シーケンスを書き換え、Windows で区切りが崩れる | Phase 1 の時点で Windows でも OSC 133 が届くかだけ確認しておく |
 | デーモンが落ちると全セッションが止まる | 出力と状態は常に SQLite に書き、落ちても「終了」から再開できるようにする |

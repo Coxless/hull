@@ -1,6 +1,3 @@
-// Windows でコンソール画面を出さない。
-#![cfg_attr(windows, windows_subsystem = "windows")]
-
 use hull_terminal_daemon::{run, Config, ShellSpec};
 
 const USAGE: &str = "\
@@ -8,7 +5,7 @@ hull-terminal-daemon: hull-terminal の PTY を持つ管理デーモン
 
 使い方: hull-terminal-daemon [--endpoint <接続先>] [--shell <bash の場所>]
 
-  --endpoint  待ち受ける Unix ソケットのパス、または名前付きパイプの名前
+  --endpoint  待ち受ける Unix ソケットのパス
               (省略時は環境変数 HULL_TERMINAL_SOCKET、なければ既定の場所)
   --shell     起動する bash (省略時は環境変数 HULL_TERMINAL_SHELL、なければ自動で探す)
 ";

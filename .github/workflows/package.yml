@@ -1,4 +1,4 @@
-# 配布パッケージ (Ubuntu の .deb と Windows のインストーラー) を作り、入れて起動できることを確かめる。
+# Ubuntu 向けの配布パッケージ (.deb) を作り、入れて起動できることを確かめる。
 # CI (プルリクエストと main への push) とリリース (タグの push) の両方から呼ばれる。
 name: Package
 
@@ -91,90 +91,4 @@ jobs:
         with:
           name: hull-terminal-deb
           path: target/release/bundle/deb/*.deb
-          if-no-files-found: error
-
-  windows:
-    name: Windows (installer)
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: package
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: app/package-lock.json
-
-      - name: フロントの依存を入れる
-        working-directory: app
-        run: npm ci
-
-      # デーモンをリリースビルドして同梱し、インストーラー (NSIS の setup.exe) にまとめる。
-      - name: インストーラーを作る
-        working-directory: app
-        run: npm run bundle -- --bundles nsis
-
-      - name: 中身を表示する
-        shell: pwsh
-        run: Get-FileHash target/release/bundle/nsis/*-setup.exe -Algorithm SHA256 | Format-List
-
-      # 作ったインストーラーを実際に入れ、起動して bash までつながることを確かめる。
-      - name: 入れて起動できるか確かめる
-        shell: pwsh
-        run: |
-          $setup = Get-ChildItem target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
-          # /S は画面を出さずに入れる指定。利用者ごとの場所 (%LOCALAPPDATA%) に入る。
-          Start-Process -FilePath $setup.FullName -ArgumentList '/S' -Wait
-          $dir = Join-Path $env:LOCALAPPDATA 'hull-terminal'
-          foreach ($name in 'hull-terminal.exe', 'hull-terminal-daemon.exe') {
-            if (-not (Test-Path (Join-Path $dir $name))) {
-              Get-ChildItem $dir -ErrorAction SilentlyContinue
-              Write-Host "::error::$name が $dir に入っていません"
-              exit 1
-            }
-          }
-
-          Start-Process -FilePath (Join-Path $dir 'hull-terminal.exe')
-
-          # アプリがデーモンを起動し、デーモンが bash を起動するまで待つ。
-          $ok = $false
-          foreach ($i in 1..120) {
-            $daemon = Get-Process -Name hull-terminal-daemon -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($daemon) {
-              $bash = Get-CimInstance Win32_Process -Filter "Name = 'bash.exe' AND ParentProcessId = $($daemon.Id)"
-              if ($bash) {
-                Write-Host "デーモン (PID $($daemon.Id)) の下で bash が動いています"
-                $ok = $true
-                break
-              }
-            }
-            Start-Sleep -Milliseconds 500
-          }
-          if (-not $ok) {
-            Write-Host "::error::アプリを起動しても、デーモンと bash が動きませんでした"
-            Get-Process | Where-Object { $_.Name -match 'hull|bash|msedgewebview2' } | Format-Table Id, Name
-            Get-Content (Join-Path $env:TEMP 'hull-terminal\daemon.log') -ErrorAction SilentlyContinue
-            exit 1
-          }
-
-          # アプリを終了しても、デーモンと bash は残る。
-          Stop-Process -Name hull-terminal -Force
-          Start-Sleep -Seconds 2
-          if (-not (Get-Process -Name hull-terminal-daemon -ErrorAction SilentlyContinue)) {
-            Write-Host "::error::アプリを閉じたらデーモンも終了しました"
-            exit 1
-          }
-          Write-Host "アプリを閉じたあともデーモンは残っています"
-          Stop-Process -Name hull-terminal-daemon -Force
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: hull-terminal-windows
-          path: target/release/bundle/nsis/*-setup.exe
           if-no-files-found: error

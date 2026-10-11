@@ -17,21 +17,12 @@ env:
 
 jobs:
   build:
-    name: ${{ matrix.name }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Ubuntu
-            os: ubuntu-24.04
-          - name: Windows
-            os: windows-latest
+    name: Ubuntu
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
-      - name: Tauri の前提パッケージ (Ubuntu)
-        if: runner.os == 'Linux'
+      - name: Tauri の前提パッケージ
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -73,12 +64,11 @@ jobs:
       - name: ビルド
         run: cargo build --workspace
 
-      # デーモンを実際に起動し、ソケット (Windows は名前付きパイプ) 越しに bash を操作する結合テストを含む。
-      # --nocapture は、ConPTY を通して OSC 133 が届くかの記録を表示するため。
+      # デーモンを実際に起動し、ソケット越しに bash を操作する結合テストを含む。
       - name: テスト
-        run: cargo test --workspace -- --nocapture
+        run: cargo test --workspace
 
-  # 配布パッケージ (.deb と Windows のインストーラー) を作り、入れて起動できることを確かめる。成果物は Artifacts から取れる。
+  # 配布パッケージ (.deb) を作り、入れて起動できることを確かめる。成果物は Artifacts から取れる。
   package:
     name: Package
     uses: ./.github/workflows/package.yml

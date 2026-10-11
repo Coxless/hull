@@ -4,24 +4,23 @@ Sep 27, 2026 · @Coxless
 
 ## 概要
 
-Phase 1 のゴールは、Ubuntu と Windows の両方で hull-terminal を開くと bash が動き、vim・less・Claude Code が普通に使え、ウィンドウを閉じて開き直しても同じ bash につながる状態にすることです。
+Phase 1 のゴールは、Ubuntu で hull-terminal を開くと bash が動き、vim・less・Claude Code が普通に使え、ウィンドウを閉じて開き直しても同じ bash につながる状態にすることです。
 
-描画は GPU（xterm.js の WebGL）を前提にし、WebGL が使えない環境では DOM 描画に自動で切り替えます。開発は Ubuntu で進め、Ubuntu で使えるようになった時点で Windows 実機の確認に移ります。
+描画は GPU（xterm.js の WebGL）を前提にし、WebGL が使えない環境では DOM 描画に自動で切り替えます。
 
-> Oct 11, 2026 追記：Windows の実機での確認（作業 9）は後回しにしました。Windows 向けのコード（Git Bash の検出、名前付きパイプ、切り離したデーモンの起動、バージョンの警告）は書いてあり、CI（windows-latest）でビルドと結合テストが通るところまでは確かめています。画面を開いての動作は未確認です。
+> Oct 12, 2026 追記：Windows への対応はやめ、Ubuntu 専用にしました。Windows 向けのコード、CI、この計画の中の Windows の作業と確認項目は消してあります。
 
 ## 範囲
 
-Phase 1 では「普通のターミナルとして両 OS で使える」ことだけを作り、ブロック表示や履歴の保存は Phase 2 以降に回します。
+Phase 1 では「普通のターミナルとして使える」ことだけを作り、ブロック表示や履歴の保存は Phase 2 以降に回します。
 
 | 区分 | 内容 |
 | --- | --- |
 | やる | デーモンが bash を1つ起動し、UI が xterm.js 1つで操作する |
-| やる | Unix ソケット（Ubuntu）と名前付きパイプ（Windows）での UI とデーモンの通信 |
+| やる | Unix ソケットでの UI とデーモンの通信 |
 | やる | UI を閉じてもデーモンと bash が残り、開き直すと再接続して直前の画面を戻す |
-| やる | Git Bash の自動検出と ConPTY での動作 |
 | やる | WebGL 描画と、使えないときの DOM 描画への自動切り替え |
-| やる | GitHub Actions で Ubuntu / Windows の両方をビルドし、簡単な結合テストを回す |
+| やる | GitHub Actions でビルドし、簡単な結合テストを回す |
 | やらない | ブロック表示、統合スクリプト、OSC 133 の解析（届くかの確認だけ行う） |
 | やらない | 下固定の入力欄、サイドバー、複数セッション |
 | やらない | SQLite 保存、ピン留め、プロセス保持、終了セッションの再開 |
@@ -41,17 +40,17 @@ hull-terminal/
 │  ├─ src/               フロント（React + TypeScript + Vite）
 │  ├─ src-tauri/         Tauri の Rust コア
 │  └─ scripts/           配布パッケージにデーモンを入れる準備
-└─ .github/workflows/    CI（Ubuntu / Windows）
+└─ .github/workflows/    CI
 ```
 
 **名前と場所**
 
-| 項目 | Ubuntu | Windows |
-| --- | --- | --- |
-| アプリ | hull-terminal | hull-terminal.exe |
-| デーモン | hull-terminal-daemon | hull-terminal-daemon.exe（コンソールを出さないビルド） |
-| 接続先 | `$XDG_RUNTIME_DIR/hull-terminal/daemon.sock` | `\\.\pipe\hull-terminal-<ユーザー名>` |
-| 起動する bash | `bash -i`（ログインシェルの設定に従う） | Git Bash の `bin\bash.exe --login -i` |
+| 項目 | 内容 |
+| --- | --- |
+| アプリ | hull-terminal |
+| デーモン | hull-terminal-daemon |
+| 接続先 | `$XDG_RUNTIME_DIR/hull-terminal/daemon.sock` |
+| 起動する bash | `bash -i`（ログインシェルの設定に従う） |
 
 **通信メッセージ**
 
@@ -74,20 +73,18 @@ Tauri の Rust コアからフロントへは、出力を Channel でバイト�
 
 ## 作業計画
 
-作業は10個で、1〜7を Ubuntu で進めて普通のターミナルとして使える状態にし、8〜10で Windows に広げます。各作業は完了条件を満たしてから次に進みます。
+作業は8個です。各作業は完了条件を満たしてから次に進みます。
 
 | # | 作業 | 内容 | 完了条件 |
 | --- | --- | --- | --- |
-| 1 | 土台づくり | Rust・Node・Tauri v2 の前提パッケージを入れ、ワークスペースと React + TypeScript の Tauri アプリを作る。CI でビルドだけ回す | 空のウィンドウが開き、CI が Ubuntu / Windows の両方で通る |
+| 1 | 土台づくり | Rust・Node・Tauri v2 の前提パッケージを入れ、ワークスペースと React + TypeScript の Tauri アプリを作る。CI でビルドだけ回す | 空のウィンドウが開き、CI が通る |
 | 2 | protocol crate | メッセージ定義とフレームの読み書きを作り、単体テストを書く | 往復のテストと、フレームが途中で分かれて届くケースのテストが通る |
 | 3 | デーモン | portable-pty で bash を起動し、interprocess でソケットを待ち受けて入出力を中継する。直近の出力をリングバッファに持つ。bash が終わったらデーモンも終わる | テスト用の小さな CLI から `echo hello` を送り、結果が返ってくる |
 | 4 | Tauri の Rust コア | デーモンに接続し、いなければ起動して接続し直す。出力を Channel でフロントへ流し、入力とリサイズをコマンドで受ける | UI からデーモンを起動でき、出力がフロントまで届く |
 | 5 | フロント | xterm.js に WebGL・fit・unicode11 アドオンを付け、サイズ変更を PTY に伝える。Ctrl+Shift+C / V でコピーと貼り付け。WebGL が使えなければ DOM 描画に切り替える | Ubuntu で ls、vim、less が普通に使える |
 | 6 | 再接続 | ウィンドウを閉じるとき Detach を送り、開き直したら Replay で直前の画面を戻す | 閉じて開き直しても `echo $$` が同じ値になる |
 | 7 | Ubuntu の確認 | 確認項目を一通り試し、WebKitGTK での日本語入力と WebGL、大量出力時の CPU 使用率を測る | Ubuntu の確認項目がすべて済み、結果を記録してある |
-| 8 | Windows 対応 | Git Bash の自動検出、名前付きパイプ、親から切り離したデーモン起動、コンソールを出さないビルド、Windows 10 1809 未満の警告を入れる | Windows で起動し、Git Bash が動く |
-| 9 | Windows の確認 | 確認項目を一通り試し、WebView2 での日本語入力と、ConPTY を通して OSC 133 が届くかを確かめる | Windows の確認項目がすべて済み、結果を記録してある |
-| 10 | CI の結合テスト | 両 OS でデーモンを起動し、`echo` の結果と Exited を受け取るテストを CI に加える | CI の結合テストが両 OS で通る |
+| 8 | CI の結合テスト | デーモンを起動し、`echo` の結果と Exited を受け取るテストを CI に加える | CI の結合テストが通る |
 
 ## 確認項目
 
@@ -104,18 +101,9 @@ Tauri の Rust コアからフロントへは、出力を Channel でバイト�
 - [x] WebGL で描画されていることを確認し、大きなファイルの `cat` と `yes` で CPU 使用率を WebGL / DOM の両方で測った
 - [x] GPU アクセラレーションのない仮想マシンで、DOM 描画に自動で切り替わって使える
 
-**Windows**（実機での確認は後回し）
-
-- [ ] Git Bash が自動で見つかり、`git`、`ls --color` が普通に使える（CI では Git Bash が見つかり、`echo` などが動くことを確認）
-- [ ] vim と Claude Code が崩れずに動き、サイズ変更に追従する
-- [ ] Ctrl+C でコマンドが止まり、bash 自体は落ちない
-- [ ] 日本語（MS-IME）の入力と表示ができる
-- [ ] ウィンドウを閉じて開き直すと同じ bash につながり、コンソール画面が一瞬出たりしない
-- [x] ConPTY を通して OSC 133 のシーケンスが届くかを確かめ、結果を記録した
-
 **共通**
 
-- [x] CI のビルドと結合テストが Ubuntu / Windows の両方で通る
+- [x] CI のビルドと結合テストが通る
 
 ## 確認結果
 
@@ -129,7 +117,7 @@ Oct 11, 2026 時点の結果です。Ubuntu の確認は、次の2つの環境�
 | 対象 | 内容 | 結果 |
 | --- | --- | --- |
 | protocol crate | メッセージの往復、1バイトずつ分かれて届くフレーム、未知のメッセージの読み飛ばし | 10 件すべて通過 |
-| デーモン（単体） | リングバッファ、あふれた部分のモードの復元、Git Bash を探す場所 | 11 件すべて通過 |
+| デーモン（単体） | リングバッファ、あふれた部分のモードの復元 | 11 件すべて通過 |
 | デーモン（結合） | `echo` の結果と Exited、再接続で同じ PID と画面、切断中の出力、サイズ変更、2万行の出力の順序、OSC 133 の通過 | 11 件すべて通過（25 回くり返して失敗なし） |
 
 **GPU のない環境での確認（ワークショップの仮想ディスプレイ）**
@@ -181,22 +169,14 @@ GPU があれば WebGL のほうが CPU は軽く、GPU がなければ DOM の�
 | GPU での合成を切った環境で、vim の画面が一部しか出ない | WebGL の画面が正しく更新されない。Rust コアが GPU の有無を調べ、なければ DOM で描く |
 | 非アクティブなウィンドウで、最後の出力が表示されない（実機、WebGL） | WebGL の描画が、次に何かを描くまで画面に出ない。カーソルが点滅している間は気づかない。描画が落ち着いたら、もう一度だけ描き直す |
 | Claude Code の罫線が画面の幅に足りない（実機） | つないでいる途中で列数が変わると、その知らせがデーモンに届かず、bash 側の列数が古いままだった。つながったあとで今の大きさを送り直す |
-| Windows で bash の出力が何も出ない（CI） | 下の CI の表を参照 |
 
-**CI（Ubuntu 24.04 / windows-latest）**
+**CI（Ubuntu 24.04）**
 
-コミット 4adbc1e と、実機で見つけた不具合を直したあとの 07123d7 で、両方のジョブ（整形の検査、clippy、ビルド、結合テストを含むテスト）が通りました。
-
-| 項目 | 結果 |
-| --- | --- |
-| Windows の結合テスト | Git Bash が自動で見つかり、名前付きパイプ越しに `echo` の結果と Exited が返る。再接続、サイズ変更、2万行の出力も通過（10 件） |
-| ConPTY を通した OSC 133 | `OSC 133;A`、`OSC 133;D;0`、`OSC 7` とも、書き換えられずにそのまま届く。Phase 2 のブロック区切りは Windows でも同じ方式で進められる見込み |
-| ConPTY の起動時の問い合わせ | ConPTY は起動直後にカーソル位置を問い合わせ（`ESC[6n`）、応答が来るまで bash の出力を流さない。UI がつながる前に出ると固まるので、デーモンが代わりに応える（`crates/daemon/src/session.rs`）。この対応の前は、Windows の結合テストがすべて時間切れになった |
+コミット 4adbc1e と、実機で見つけた不具合を直したあとの 07123d7 で、ジョブ（整形の検査、clippy、ビルド、結合テストを含むテスト）が通りました。
 
 **まだ確認できていないこと**
 
 - Ubuntu：人が実際に使っての確認。上の結果は、キー操作を機械的に送って確かめたもので、ふだんのデスクトップで毎日使ったわけではない。日本語入力の候補の一覧は、カーソルより少し右下に離れて出る
-- Windows の実機（後回し）：画面を開いての確認項目すべて。特に、ウィンドウを閉じてもデーモンが残るか、コンソール画面が出ないか、WebView2 での日本語入力
 
 ## 決めること・リスク
 
@@ -214,13 +194,11 @@ GPU があれば WebGL のほうが CPU は軽く、GPU がなければ DOM の�
 - Shift+Enter の区別：従来の符号化では Enter と区別できないので、kitty keyboard protocol の有効・無効と問い合わせにだけ応え、修飾キー付きの Enter を `CSI 13;<修飾>u` で送る。ほかのキーは従来の符号化のまま
 - ステータスバー：状態、bash の PID、列数×行数、描画方法（WebGL / DOM）を下に表示する。確認項目を目で確かめるためのもの
 - 環境変数：`HULL_TERMINAL_SOCKET`（接続先）、`HULL_TERMINAL_SHELL`（起動する bash）、`HULL_TERMINAL_DAEMON`（デーモンの場所）、`HULL_TERMINAL_RENDERER`（`webgl` / `dom`）
-- デーモンのログ：Ubuntu は `$XDG_RUNTIME_DIR/hull-terminal/daemon.log`、Windows は `%TEMP%\hull-terminal\daemon.log`
+- デーモンのログ：`$XDG_RUNTIME_DIR/hull-terminal/daemon.log`
 
 **リスクと対策**
 
 | リスク | 対策 |
 | --- | --- |
 | WebKitGTK で日本語入力や WebGL が不安定 | 作業5・7で早めに確かめる。致命的なら画面層を Electron に移す判断をこの時点でする |
-| ConPTY が画面を描き直したり制御シーケンスを書き換えたりする | 作業9で確かめる。問題があれば新しい版の conpty.dll を同梱する方法を検討する |
-| Windows で UI を閉じるとデーモンも一緒に終了する | 親から切り離して起動し、作業9の確認項目で必ず試す |
 | 大量出力で UI が固まる | 作業7で CPU 使用率を測り、描画をまとめて行う |

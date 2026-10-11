@@ -1,4 +1,4 @@
-//! Unix ソケット (Ubuntu) と名前付きパイプ (Windows) を同じ書き方で扱う。
+//! UI とデーモンをつなぐ Unix ソケット。
 
 use std::io;
 
@@ -21,17 +21,15 @@ pub async fn connect(endpoint: &str) -> io::Result<(RecvHalf, SendHalf)> {
     Ok(Stream::connect(name(endpoint)?).await?.split())
 }
 
-/// 接続を待ち受ける。Unix ではソケットの親ディレクトリを自分だけが読める形で作る。
+/// 接続を待ち受ける。ソケットの親ディレクトリは自分だけが読める形で作る。
 ///
 /// 同じ接続先で別のデーモンが生きていれば `AddrInUse` を返す。
 /// 前のデーモンが残したソケットファイルだけがある場合は、消して作り直す。
 pub async fn listen(endpoint: &str) -> io::Result<Listener> {
-    #[cfg(unix)]
     prepare_socket_dir(endpoint)?;
 
     match ListenerOptions::new().name(name(endpoint)?).create_tokio() {
         Ok(listener) => Ok(listener),
-        #[cfg(unix)]
         Err(e) if e.kind() == io::ErrorKind::AddrInUse => {
             if Stream::connect(name(endpoint)?).await.is_ok() {
                 return Err(e);
@@ -48,7 +46,6 @@ pub async fn accept(listener: &Listener) -> io::Result<(RecvHalf, SendHalf)> {
     Ok(listener.accept().await?.split())
 }
 
-#[cfg(unix)]
 fn prepare_socket_dir(endpoint: &str) -> io::Result<()> {
     use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 
