@@ -56,13 +56,15 @@ export class BlockSession {
 
   /** 届いた出力と知らせを、届いた順に1つずつ片づけるための列。 */
   private tail: Promise<void> = Promise.resolve();
+  /** 最後に渡した出力を、xterm.js が読み終えたとき。 */
+  private lastWrite: Promise<void> = Promise.resolve();
   /** 接続のたびに増える。前の接続から遅れて届いたものを捨てるために使う。 */
   private connectionId = 0;
   /** bash が変わるたびに増える。ブロックの名前に使う。 */
   private bash = 0;
   private lastPid: number | null = null;
   /** 流し直しの出力を書いている最中。端末の応答を bash に送らない。 */
-  private replaying = false;
+  private replaying = 0;
   private rejections = 0;
 
   /** 実行中のブロックの、見せる高さを決める要素。 */
@@ -178,10 +180,11 @@ export class BlockSession {
     // 知らせは `attach` の結果より先に届くことがある。結果 (同じ bash かどうか) を見てから
     // 片づけるよう、列の先頭で結果を待つ。
     const attached = attach(this.term.cols, this.term.rows, false, {
-      onReplay: (data) => this.enqueue(current, () => this.write(data, true)),
-      onOutput: (data) => this.enqueue(current, () => this.write(data, false)),
+      onReplay: (data) => this.enqueueWrite(current, data, true),
+      onOutput: (data) => this.enqueueWrite(current, data, false),
       onControl: (event) => this.enqueue(current, () => this.handle(event)),
     });
+    this.lastWrite = Promise.resolve();
     this.tail = attached.then(
       (info) => {
         if (current()) {
@@ -211,9 +214,26 @@ export class BlockSession {
     resize(this.term.cols, this.term.rows);
   }
 
-  private enqueue(current: () => boolean, task: () => void | Promise<void>): void {
+  /**
+   * 知らせを片づける。それより前に届いた出力を xterm.js が読み終えてから行う
+   * (ブロックの終わりで、出力の途中の画面を固定しないように)。
+   */
+  private enqueue(current: () => boolean, task: () => void): void {
+    const written = this.lastWrite;
     this.tail = this.tail
+      .then(() => written)
       .then(() => (current() ? task() : undefined))
+      .catch((error: unknown) => console.error(error));
+  }
+
+  /**
+   * 出力を xterm.js に渡す。それより前に届いた知らせを片づけてから渡すが、前の出力を
+   * 読み終えるのは待たない (1つずつ待つと、xterm.js がまとめて読めず、流し続ける出力に
+   * 画面が追いつかなくなる)。
+   */
+  private enqueueWrite(current: () => boolean, data: Uint8Array, replay: boolean): void {
+    this.lastWrite = this.tail
+      .then(() => (current() ? this.write(data, replay) : undefined))
       .catch((error: unknown) => console.error(error));
   }
 
@@ -221,9 +241,9 @@ export class BlockSession {
     return new Promise((resolve) => {
       // 流し直す出力に入っている問い合わせ (カーソル位置や色など) に端末が応答すると、
       // その応答が実行中のコマンドへの入力になってしまう。書き終えるまで入力を送らない。
-      this.replaying = replay;
+      this.replaying += replay ? 1 : 0;
       this.term.write(data, () => {
-        this.replaying = false;
+        this.replaying -= replay ? 1 : 0;
         this.acks.add(data.length);
         resolve();
       });
@@ -379,7 +399,7 @@ export class BlockSession {
 
   private send(data: Uint8Array): void {
     const { connection, running } = useSession.getState();
-    if (connection === "connected" && running !== null && !this.replaying) {
+    if (connection === "connected" && running !== null && this.replaying === 0) {
       this.input.push(data);
     }
   }
