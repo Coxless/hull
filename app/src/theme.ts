@@ -10,7 +10,12 @@ export const BACKGROUND = "#141316";
 /** ブロックのカードの色 (実行中のブロックの背景)。 */
 export const PANEL = "#1d1c21";
 
-/** 暗い背景に琥珀色のアクセント。背景だけ、置く場所に合わせて変える。 */
+/**
+ * 暗い背景に琥珀色のアクセント。背景だけ、置く場所に合わせて変える。
+ *
+ * 色は、styles.css の `--ansi-*` と同じ値にする (終了したブロックは HTML で描くので、
+ * 実行中と色が変わらないように)。
+ */
 export function terminalTheme(background: string): ITheme {
   return {
     background,

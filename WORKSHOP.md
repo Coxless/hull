@@ -54,7 +54,7 @@ workshop run -- setup      # Tauri の前提パッケージを入れ、`cargo fe
 | `setup`   | システム依存の導入、`cargo fetch`、`npm install`  | `workshop run -- setup`   |
 | `build`   | `cargo build --workspace` とフロントのビルド      | `workshop run -- build`   |
 | `package` | デーモンを同梱した配布パッケージを作成          | `workshop run -- package --bundles deb` |
-| `test`    | `cargo test --workspace` (bash を操作する結合テストを含む) | `workshop run -- test`    |
+| `test`    | `cargo test --workspace` (bash を操作する結合テストを含む) と、フロントのテスト (vitest) | `workshop run -- test`    |
 | `lint`    | `cargo clippy` と `tsc --noEmit`                  | `workshop run -- lint`    |
 | `fmt`     | `cargo fmt` と prettier                           | `workshop run -- fmt`     |
 

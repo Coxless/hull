@@ -50,6 +50,10 @@ jobs:
         working-directory: app
         run: npm run format:check
 
+      - name: フロントのテスト
+        working-directory: app
+        run: npm test
+
       # Tauri のビルドがフロントの成果物 (app/dist) を取り込むので、Rust より先に作る。
       - name: フロントの型検査とビルド
         working-directory: app

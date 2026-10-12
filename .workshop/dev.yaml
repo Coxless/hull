@@ -54,6 +54,7 @@ actions:
     cd /project
     if [ -f app/package.json ] && [ ! -d app/dist ]; then npm --prefix app run build; fi
     cargo test --workspace "$@"
+    if [ -f app/package.json ]; then npm --prefix app test; fi
 
   lint: |
     cd /project

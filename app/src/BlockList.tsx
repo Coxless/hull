@@ -17,9 +17,16 @@ export function BlockList() {
 
   useEffect(() => {
     const element = list.current!;
+    // 下から離れるのは、上へ送られたときだけにする。中身が伸びた直後は、まだ下まで送って
+    // いなくても「下に付いている」のままにしておく (続けて伸びたときに、付いたままでいるため)。
+    let lastTop = element.scrollTop;
     const onScroll = () => {
-      stuck.current =
+      const atBottom =
         element.scrollHeight - element.scrollTop - element.clientHeight < STICK_THRESHOLD;
+      if (atBottom || element.scrollTop < lastTop - 1) {
+        stuck.current = atBottom;
+      }
+      lastTop = element.scrollTop;
     };
     const follow = () => {
       if (stuck.current) {
