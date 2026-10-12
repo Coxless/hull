@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { Block } from "./Block";
 import { RunningBlock } from "./RunningBlock";
 import { useSession } from "./store";
+import { isFailed } from "./TopBar";
 
 /** いちばん下からこの高さ以内にいれば、「下に付いている」とみなす。 */
 const STICK_THRESHOLD = 48;
@@ -11,6 +12,7 @@ export function BlockList() {
   const blocks = useSession((state) => state.blocks);
   const running = useSession((state) => state.running);
   const connection = useSession((state) => state.connection);
+  const failedOnly = useSession((state) => state.failedOnly);
   const list = useRef<HTMLDivElement>(null);
   const inner = useRef<HTMLDivElement>(null);
   const stuck = useRef(true);
@@ -52,13 +54,23 @@ export function BlockList() {
     }
   }, [runningKey]);
 
+  // 絞り込みを切り替えたら、いちばん下から見せる。
+  useEffect(() => {
+    stuck.current = true;
+    list.current!.scrollTop = list.current!.scrollHeight;
+  }, [failedOnly]);
+
+  const shown = failedOnly ? blocks.filter(isFailed) : blocks;
   const empty = blocks.length === 0 && running === null && connection === "connected";
   return (
     <div className="blocks" ref={list}>
       <div className="blocks-inner" ref={inner}>
-        {blocks.map((block) => (
+        {shown.map((block) => (
           <Block key={block.key} block={block} />
         ))}
+        {failedOnly && shown.length === 0 && (
+          <div className="blocks-empty">このセッションに失敗したコマンドはありません</div>
+        )}
         {running && <RunningBlock key={running.key} block={running} />}
         {empty && (
           <div className="blocks-empty">下の入力欄にコマンドを入力して、Enter で実行します</div>

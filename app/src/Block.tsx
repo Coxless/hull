@@ -1,9 +1,10 @@
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { memo, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useBlockSession } from "./BlockView";
 import { formatClock, formatDuration } from "./format";
 import type { BlockInfo } from "./pty";
-import type { Rendered } from "./render";
-import { outputs, type BlockEntry } from "./store";
+import { plainText, type Rendered } from "./render";
+import { outputs, useSession, type BlockEntry } from "./store";
 
 /** 折りたたんだときに見せる行数。 */
 const FOLD_LINES = 30;
@@ -64,6 +65,7 @@ export const Block = memo(function Block({ block }: Props) {
             exit {result.exitCode}
           </span>
         )}
+        <Actions block={block} />
       </BlockHeader>
       {result.fullscreen ? (
         <div className="block-fullscreen">
@@ -75,6 +77,94 @@ export const Block = memo(function Block({ block }: Props) {
     </section>
   );
 });
+
+/** ブロックの操作。コマンドのコピー、出力のコピー、もう一度実行。 */
+function Actions({ block }: Props) {
+  const session = useBlockSession();
+  const ready = useSession((state) => state.ready && state.connection === "connected");
+  const command = block.info.command ?? "";
+
+  const copyOutput = async () => {
+    // 開き直して戻したブロックで、まだ画面に入っていないものは、ここで出力を取る。
+    const rendered = outputs.get(block.key) ?? (await session?.loadOutput(block));
+    if (!rendered) {
+      throw new Error("出力は残っていません");
+    }
+    await writeText(plainText(rendered.lines));
+  };
+
+  return (
+    <span className="block-actions">
+      {command !== "" && (
+        <CopyButton label="コマンドをコピー" copy={() => writeText(command)}>
+          <path d="M7 8l-4 4 4 4M17 8l4 4-4 4M14 4l-4 16" />
+        </CopyButton>
+      )}
+      {!block.result.fullscreen && (
+        <CopyButton label="出力をコピー" copy={copyOutput}>
+          <rect x="9" y="9" width="11" height="11" rx="2" />
+          <path d="M5 15V5a2 2 0 0 1 2-2h10" />
+        </CopyButton>
+      )}
+      {command !== "" && (
+        <button
+          type="button"
+          className="block-action"
+          aria-label="もう一度実行"
+          title="もう一度実行"
+          disabled={!ready}
+          onClick={() => session?.run(command)}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M3 12a9 9 0 1 0 3-6.7" />
+            <path d="M3 4v5h5" />
+          </svg>
+        </button>
+      )}
+    </span>
+  );
+}
+
+interface CopyButtonProps {
+  label: string;
+  copy(): Promise<void>;
+  /** アイコンの中身 (SVG の図形)。 */
+  children: ReactNode;
+}
+
+/** コピーのボタン。コピーできたら、少しの間だけチェックの印にする。 */
+function CopyButton({ label, copy, children }: CopyButtonProps) {
+  const [state, setState] = useState<"idle" | "done" | "failed">("idle");
+  useEffect(() => {
+    if (state === "idle") {
+      return;
+    }
+    const timer = window.setTimeout(() => setState("idle"), 1200);
+    return () => window.clearTimeout(timer);
+  }, [state]);
+
+  const title =
+    state === "done" ? "コピーしました" : state === "failed" ? "コピーできません" : label;
+  return (
+    <button
+      type="button"
+      className="block-action"
+      data-state={state}
+      aria-label={label}
+      title={title}
+      onClick={() => {
+        copy().then(
+          () => setState("done"),
+          () => setState("failed"),
+        );
+      }}
+    >
+      <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+        {state === "done" ? <path d="M5 12l5 5 9-10" /> : children}
+      </svg>
+    </button>
+  );
+}
 
 /** まだ取っていない / もう残っていない。 */
 type OutputState = Rendered | "pending" | "gone";

@@ -152,6 +152,17 @@ function rgb(red: number, green: number, blue: number): string {
   return `#${[red, green, blue].map((level) => level.toString(16).padStart(2, "0")).join("")}`;
 }
 
+/** HTML にした行を、色のない文字に戻す (コピー用)。 */
+export function plainText(lines: string[]): string {
+  return lines.map((line) => line.replace(/<[^>]*>/g, "").replace(/&(\w+);/g, unescape)).join("\n");
+}
+
+function unescape(entity: string, name: string): string {
+  return UNESCAPES[name] ?? entity;
+}
+
+const UNESCAPES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"' };
+
 function escape(text: string): string {
   return text.replace(/[&<>"]/g, (char) => ESCAPES[char]);
 }

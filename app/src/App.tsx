@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { BlockView } from "./BlockView";
 import { appOptions } from "./pty";
 import { INITIAL_STATUS, StatusBar, type TerminalStatus } from "./StatusBar";
 import { useSession } from "./store";
 import { TerminalView } from "./TerminalView";
+import { TopBar } from "./TopBar";
 
 /** ブロックの表示か、区切りを通さない生の表示か。 */
 type Mode = "blocks" | "raw";
@@ -20,8 +21,27 @@ export function App() {
       .catch(() => setMode("blocks"));
   }, []);
 
+  const toggleRaw = useCallback(() => {
+    setRawStatus(INITIAL_STATUS);
+    setMode((current) => (current === "raw" ? "blocks" : "raw"));
+  }, []);
+
+  // Ctrl+Shift+R で、生の表示とブロックの表示を切り替える。端末に渡る前に受け取る。
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.ctrlKey && event.shiftKey && !event.altKey && event.code === "KeyR") {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleRaw();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [toggleRaw]);
+
   return (
     <div className="app">
+      {mode !== null && <TopBar raw={mode === "raw"} onToggleRaw={toggleRaw} />}
       {mode === "blocks" && <BlockView onUnintegrated={() => setMode("raw")} />}
       {mode === "raw" && <TerminalView onStatus={setRawStatus} />}
       {mode === null && <div className="terminal-host" />}

@@ -1,3 +1,4 @@
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { BlockList } from "./BlockList";
 import { BlockSession } from "./blockSession";
@@ -30,6 +31,23 @@ export function BlockView({ onUnintegrated }: Props) {
     });
     setSession(created);
     return () => created.dispose();
+  }, []);
+
+  // 終了したブロックの出力で選んだ文字を、端末と同じ Ctrl+Shift+C でコピーする。
+  // 実行中のブロック (xterm.js) の選択は、xterm.js の側でコピーする。
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey && event.shiftKey && event.code === "KeyC")) {
+        return;
+      }
+      const selection = window.getSelection()?.toString() ?? "";
+      if (selection !== "") {
+        event.preventDefault();
+        void writeText(selection);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
   return (
