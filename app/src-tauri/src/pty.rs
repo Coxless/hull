@@ -301,6 +301,8 @@ pub struct AppOptions {
     renderer: Option<String>,
     /// 生の表示で始める。
     raw: bool,
+    /// ホームディレクトリ。ディレクトリの表示を `~` で短くするために使う。
+    home: Option<String>,
 }
 
 /// 描画方法を指定する環境変数 (`webgl` / `dom`)。
@@ -315,7 +317,8 @@ pub fn app_options() -> AppOptions {
         .filter(|v| !v.is_empty())
         .or_else(|| (!daemon::gpu_available()).then(|| "dom".to_string()));
     let raw = std::env::var(MODE_ENV).is_ok_and(|mode| mode == "raw");
-    AppOptions { renderer, raw }
+    let home = std::env::var("HOME").ok().filter(|home| !home.is_empty());
+    AppOptions { renderer, raw, home }
 }
 
 /// デーモンに接続し (いなければ起動し)、画面をつなぐ。

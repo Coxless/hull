@@ -351,8 +351,52 @@ button:disabled {
   border-color: #6a5a3a;
 }
 
+.composer-box[data-running="true"] {
+  border-color: #34313a;
+}
+
+.composer-chips {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-height: 22px;
+  padding: 10px 12px 0;
+  overflow: hidden;
+}
+
+.composer-chip {
+  display: flex;
+  flex-shrink: 0;
+  gap: 5px;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--border-soft);
+  color: var(--text-soft);
+  font-family: var(--mono-font);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.composer-chip[data-kind="running"] {
+  background: rgba(230, 181, 98, 0.16);
+  color: var(--accent);
+  font-family: var(--ui-font);
+}
+
+.composer-chip svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-width: 2.4;
+}
+
+.composer-notice {
+  color: var(--err);
+}
+
 .composer-input {
-  padding: 12px 14px 4px;
+  padding: 8px 14px 4px;
   border: 0;
   outline: none;
   background: transparent;

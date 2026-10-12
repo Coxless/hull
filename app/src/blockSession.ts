@@ -16,6 +16,7 @@ import {
   blockOutput,
   resize,
   run,
+  sendInput,
   type AttachInfo,
   type ControlEvent,
 } from "./pty";
@@ -62,6 +63,7 @@ export class BlockSession {
   private lastPid: number | null = null;
   /** 流し直しの出力を書いている最中。端末の応答を bash に送らない。 */
   private replaying = false;
+  private rejections = 0;
 
   /** 実行中のブロックの、見せる高さを決める要素。 */
   private clip: HTMLElement | null = null;
@@ -143,14 +145,13 @@ export class BlockSession {
   }
 
   private async start(): Promise<void> {
-    const renderer = await appOptions()
-      .then((options) => options.renderer)
-      .catch(() => null);
+    const options = await appOptions().catch(() => null);
     if (this.disposed) {
       return;
     }
     useSession.setState({
-      renderer: enableRenderer(this.term, renderer, (changed) => {
+      home: options?.home ?? null,
+      renderer: enableRenderer(this.term, options?.renderer ?? null, (changed) => {
         useSession.setState({ renderer: changed });
       }),
     });
@@ -275,7 +276,11 @@ export class BlockSession {
         break;
       }
       case "runRejected":
-        useSession.setState({ pending: null });
+        this.rejections += 1;
+        useSession.setState({
+          pending: null,
+          rejected: { text: event.text, reason: event.reason, serial: this.rejections },
+        });
         break;
       case "exited":
         this.input.clear();
@@ -357,9 +362,19 @@ export class BlockSession {
     if (state.connection !== "connected" || !state.ready) {
       return false;
     }
-    useSession.setState({ ready: false, pending: text });
+    useSession.setState({ ready: false, pending: text, rejected: null });
     run(text).catch(() => useSession.setState({ pending: null }));
     return true;
+  }
+
+  /**
+   * 送ったテキストに bash が応えないとき (プロンプトが端末に問い合わせる設定など) に、
+   * Ctrl+C を送って取り消す。
+   */
+  interrupt(): void {
+    if (useSession.getState().connection === "connected") {
+      sendInput(Uint8Array.of(0x03));
+    }
   }
 
   private send(data: Uint8Array): void {

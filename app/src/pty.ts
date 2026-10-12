@@ -68,6 +68,7 @@ export interface AppOptions {
   renderer: string | null;
   /** 生の表示で始める (`HULL_TERMINAL_MODE=raw`)。 */
   raw: boolean;
+  home: string | null;
 }
 
 export interface PtyHandlers {
@@ -132,6 +133,13 @@ export async function blockOutput(id: number): Promise<{ data: Uint8Array; trunc
   // 先頭の1バイトが、出力の先頭を省いたかどうか。残りが出力。
   const body = new Uint8Array(await invoke<ArrayBuffer>("block_output", { id }));
   return { data: body.subarray(1), truncated: body[0] === 1 };
+}
+
+/** キー入力のバイト列を、そのまま bash に送る。 */
+export function sendInput(data: Uint8Array): void {
+  invoke("pty_input", data).catch(() => {
+    // 切断中の入力は捨てる。
+  });
 }
 
 export function resize(cols: number, rows: number): void {
