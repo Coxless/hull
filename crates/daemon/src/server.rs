@@ -13,9 +13,10 @@ use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio::time::timeout;
 
+use crate::block::StoredOutput;
 use crate::integration::Integration;
 use crate::session::{ClientEvent, Session};
-use crate::{ShellSpec, DEFAULT_RING_CAPACITY};
+use crate::{ShellSpec, DEFAULT_OUTPUT_BUDGET, DEFAULT_RING_CAPACITY};
 
 /// 接続してから `Hello` が届くまで待つ時間。
 const HELLO_TIMEOUT: Duration = Duration::from_secs(5);
@@ -31,13 +32,20 @@ pub struct Config {
     pub endpoint: String,
     /// 起動するシェル。`None` なら [`ShellSpec::detect`] で探す。
     pub shell: Option<ShellSpec>,
-    /// 再接続のときに流し直す出力の量 (バイト)。
+    /// 再接続のときに流し直す出力の量 (バイト)。ブロック1つの出力の上限でもある。
     pub ring_capacity: usize,
+    /// 終了したブロックの出力を、合わせてどこまで持つか (バイト)。
+    pub output_budget: usize,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Self { endpoint: default_endpoint(), shell: None, ring_capacity: DEFAULT_RING_CAPACITY }
+        Self {
+            endpoint: default_endpoint(),
+            shell: None,
+            ring_capacity: DEFAULT_RING_CAPACITY,
+            output_budget: DEFAULT_OUTPUT_BUDGET,
+        }
     }
 }
 
@@ -53,7 +61,8 @@ pub async fn run(config: Config) -> anyhow::Result<u32> {
         None => ShellSpec::detect()?,
     };
     let integration = if shell.integration { install_integration(&config.endpoint) } else { None };
-    let (session, mut end) = Session::spawn(&shell, config.ring_capacity, integration.as_ref())?;
+    let (session, mut end) =
+        Session::spawn(&shell, config.ring_capacity, config.output_budget, integration.as_ref())?;
     let session = Arc::new(session);
 
     let mut clients = JoinSet::new();
@@ -129,6 +138,7 @@ async fn client_loop(
                 version: PROTOCOL_VERSION,
                 daemon_version: env!("CARGO_PKG_VERSION").into(),
                 pid: session.pid(),
+                integrated: session.integrated(),
             };
             write_frame(&mut writer, &welcome).await?;
             writer.flush().await?;
@@ -149,14 +159,31 @@ async fn client_loop(
         tokio::select! {
             message = messages.recv() => match message {
                 None | Some(ClientMessage::Detach) => break,
-                Some(ClientMessage::Attach { cols, rows }) => {
+                Some(ClientMessage::Attach { cols, rows, raw }) => {
                     session.resize(cols, rows);
+                    // 生の表示かどうかは、最初の Attach で決まる。
                     if events.is_none() {
-                        let attachment = session.attach();
-                        let replay = ServerMessage::Replay { data: attachment.replay };
-                        write_frame(&mut writer, &replay).await?;
+                        let attachment = session.attach(raw);
+                        for message in &attachment.greeting {
+                            write_frame(&mut writer, message).await?;
+                        }
                         writer.flush().await?;
                         events = Some(attachment.events);
+                    }
+                }
+                Some(ClientMessage::Run { text }) => {
+                    if let Err(reason) = session.run(&text) {
+                        write_frame(&mut writer, &ServerMessage::RunRejected { reason, text }).await?;
+                        writer.flush().await?;
+                    }
+                }
+                Some(ClientMessage::FetchOutput { id }) => {
+                    // 知らない番号には答えない (実行中のブロックの出力は Replay と Output で届く)。
+                    if let Some(output) = session.block_output(id) {
+                        let StoredOutput { data, truncated } = output;
+                        let message = ServerMessage::BlockOutput { id, data, truncated };
+                        write_frame(&mut writer, &message).await?;
+                        writer.flush().await?;
                     }
                 }
                 Some(ClientMessage::Input { data }) => session.write_input(data),
@@ -195,6 +222,7 @@ async fn write_events(
             Some(ClientEvent::Output(data)) => {
                 write_frame(writer, &ServerMessage::Output { data: data.to_vec() }).await?;
             }
+            Some(ClientEvent::Message(message)) => write_frame(writer, &message).await?,
             Some(ClientEvent::Exited(code)) => {
                 write_frame(writer, &ServerMessage::Exited { code }).await?;
                 break Flow::Finished;

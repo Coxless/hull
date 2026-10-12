@@ -176,7 +176,9 @@ pub async fn pty_attach(
         .await
         .map_err(|_| "デーモンが応答しません".to_string())??;
 
-    write_frame(&mut send, &ClientMessage::Attach { cols, rows }).await.map_err(io)?;
+    // ブロックの画面ができるまでは、生の表示でつなぐ。
+    let attach = ClientMessage::Attach { cols, rows, raw: true };
+    write_frame(&mut send, &attach).await.map_err(io)?;
     send.flush().await.map_err(|e| io(e.into()))?;
 
     let flow = Arc::new(Flow::default());
@@ -249,8 +251,8 @@ async fn forward_output(
             Ok(ServerMessage::Error { message }) => {
                 break Control::Disconnected { reason: Some(message) }
             }
-            // 未知のメッセージ (新しいデーモンのもの) は読み飛ばす。
-            Ok(ServerMessage::Welcome { .. }) | Err(_) => {}
+            // 生の表示では届かないものと、未知のメッセージ (新しいデーモンのもの) は読み飛ばす。
+            Ok(_) | Err(_) => {}
         }
     };
     if flush(&mut batch) {

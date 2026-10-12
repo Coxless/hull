@@ -11,16 +11,19 @@ pub struct Ring {
     capacity: usize,
     /// 捨てたバイト列を読み終えた時点の状態。
     evicted: ModeTracker,
+    /// あふれて、先頭を捨てたことがある。
+    truncated: bool,
 }
 
 impl Ring {
     pub fn new(capacity: usize) -> Self {
-        Self { buf: VecDeque::new(), capacity, evicted: ModeTracker::default() }
+        Self { buf: VecDeque::new(), capacity, evicted: ModeTracker::default(), truncated: false }
     }
 
     pub fn push(&mut self, data: &[u8]) {
         let overflow = (self.buf.len() + data.len()).saturating_sub(self.capacity);
         let from_buf = overflow.min(self.buf.len());
+        self.truncated |= overflow > 0;
         for byte in self.buf.drain(..from_buf) {
             self.evicted.feed(byte);
         }
@@ -48,6 +51,11 @@ impl Ring {
         out.reserve(self.buf.len() - skip);
         out.extend(self.buf.iter().skip(skip));
         out
+    }
+
+    /// あふれて、先頭を捨てたことがあるか。
+    pub fn is_truncated(&self) -> bool {
+        self.truncated
     }
 
     pub fn len(&self) -> usize {
@@ -191,6 +199,7 @@ mod tests {
         ring.push(b"world");
         assert_eq!(ring.snapshot(), b"hello world");
         assert_eq!(ring.len(), 11);
+        assert!(!ring.is_truncated());
     }
 
     #[test]
@@ -198,6 +207,7 @@ mod tests {
         let mut ring = Ring::new(8);
         ring.push(b"0123456789");
         assert_eq!(ring.snapshot(), b"23456789");
+        assert!(ring.is_truncated());
         ring.push(b"ab");
         assert_eq!(ring.snapshot(), b"456789ab");
         ring.push(b"ABCDEFGHIJKLMNOP");
