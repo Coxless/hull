@@ -21,6 +21,26 @@
   /* 端末の1行の高さ。xterm.js を開いたあとで、実際の値に置き換える。 */
   --cell-height: 17px;
 
+  /* 終了したブロックの出力の色。実行中のブロック (xterm.js) のテーマと同じにする。 */
+  --term-fg: #e7e2d9;
+  --term-bg: var(--panel);
+  --ansi-0: #2a2830;
+  --ansi-1: #f2946d;
+  --ansi-2: #7cc4a4;
+  --ansi-3: #e6b562;
+  --ansi-4: #8ab8ec;
+  --ansi-5: #c79ad1;
+  --ansi-6: #7fc7c9;
+  --ansi-7: #c9c3b8;
+  --ansi-8: #8f8a82;
+  --ansi-9: #f7b094;
+  --ansi-10: #9ad9bd;
+  --ansi-11: #f3cd86;
+  --ansi-12: #a9cdf3;
+  --ansi-13: #dab7e2;
+  --ansi-14: #a3dcdd;
+  --ansi-15: #f3eee5;
+
   /* ブロックの一覧と、ブロックの中の余白。実行中のブロックが使える大きさの計算にも使う。 */
   --list-pad-top: 20px;
   --list-pad-x: 24px;
@@ -216,11 +236,56 @@ button:disabled {
   margin: 0;
   padding: 0 var(--block-pad-right) var(--block-pad-bottom) var(--block-pad-left);
   overflow-x: auto;
-  color: var(--text);
+  color: var(--term-fg);
   font-family: var(--mono-font);
   font-size: var(--mono-size);
   line-height: var(--cell-height);
   white-space: pre;
+}
+
+.block-output::-webkit-scrollbar {
+  height: 8px;
+}
+
+.block-output::-webkit-scrollbar-thumb {
+  border-radius: 8px;
+  background: #2e2c33;
+}
+
+.block-note {
+  padding: 0 var(--block-pad-right) 6px var(--block-pad-left);
+  color: var(--mute);
+  font-size: 12px;
+}
+
+.block-fold {
+  padding: 4px 8px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.block-fold button {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.block-fold button:hover {
+  background: #26242b;
+}
+
+.block-fold svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.4;
 }
 
 .block-outside {
@@ -229,8 +294,12 @@ button:disabled {
 }
 
 .block-outside .block-output,
+.block-outside .block-note,
 .block-outside .block-terminal {
   padding-top: var(--block-pad-bottom);
+}
+
+.block-outside .block-output {
   color: var(--mute);
 }
 
@@ -246,6 +315,13 @@ button:disabled {
 
 .block-terminal {
   padding: 0 var(--block-pad-right) var(--block-pad-bottom) var(--block-pad-left);
+}
+
+/* 始まってすぐは、端末を見せない (場所も取らない)。 */
+.block-terminal[data-shown="false"] {
+  height: 0;
+  padding: 0;
+  overflow: hidden;
 }
 
 .block-terminal-clip {

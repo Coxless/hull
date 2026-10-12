@@ -4,6 +4,12 @@ import { useBlockSession } from "./BlockView";
 import { formatDuration } from "./format";
 import type { RunningEntry } from "./store";
 
+/**
+ * 始まってからこの時間は、端末を見せない。その間に終われば、最初から静的な表示になる
+ * (すぐ終わるコマンドで、端末が一瞬だけ出て入れ替わるのを避ける)。
+ */
+const SHOW_DELAY_MS = 80;
+
 interface Props {
   block: RunningEntry;
 }
@@ -13,6 +19,15 @@ export function RunningBlock({ block }: Props) {
   const session = useBlockSession();
   const slot = useRef<HTMLDivElement>(null);
   const clip = useRef<HTMLDivElement>(null);
+  const [shown, setShown] = useState(() => Date.now() - block.info.startedAt >= SHOW_DELAY_MS);
+
+  useEffect(() => {
+    if (shown) {
+      return;
+    }
+    const timer = window.setTimeout(() => setShown(true), SHOW_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [shown]);
 
   useEffect(() => {
     if (!session) {
@@ -22,12 +37,13 @@ export function RunningBlock({ block }: Props) {
     return () => session.unmount();
   }, [session]);
 
-  // コマンドの外で出た出力は、始まってすぐ終わる。見出しは付けない。
+  // コマンドの外で出た出力は、始まってすぐ終わる。見出しは付けず、端末を見せる前は何も出さない。
   const outside = block.info.command === null;
   return (
     <section
       className={outside ? "block block-outside" : "block"}
       data-running="true"
+      hidden={outside && !shown}
       onMouseDown={(event) => {
         // 文字の選択は xterm.js に任せ、それ以外の場所を押したときだけフォーカスを移す。
         if (!slot.current?.contains(event.target as Node)) {
@@ -44,7 +60,7 @@ export function RunningBlock({ block }: Props) {
           </span>
         </BlockHeader>
       )}
-      <div className="block-terminal">
+      <div className="block-terminal" data-shown={shown}>
         <div className="block-terminal-clip" ref={clip}>
           <div ref={slot} />
         </div>

@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import type { BlockInfo, BlockResult, PromptState } from "./pty";
+import type { Rendered } from "./render";
 import type { Renderer } from "./renderer";
 
 export type Connection = "connecting" | "connected" | "exited" | "disconnected";
@@ -63,5 +64,10 @@ export function resetSession(): void {
   outputs.clear();
 }
 
-/** 終了したブロックの出力 (1行ずつの文字列)。`BlockEntry.key` で引く。 */
-export const outputs = new Map<string, string[]>();
+/**
+ * 終了したブロックの出力を、色付きの HTML にしたもの。`BlockEntry.key` で引く。
+ *
+ * この画面で終わるのを見たブロックは、終わったときに入れる。開き直して戻したブロックは、
+ * 画面に入ったときにデーモンから出力を取って入れる。
+ */
+export const outputs = new Map<string, Rendered>();

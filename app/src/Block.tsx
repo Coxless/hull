@@ -1,7 +1,12 @@
-import { memo, type ReactNode } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useBlockSession } from "./BlockView";
 import { formatClock, formatDuration } from "./format";
 import type { BlockInfo } from "./pty";
+import type { Rendered } from "./render";
 import { outputs, type BlockEntry } from "./store";
+
+/** 折りたたんだときに見せる行数。 */
+const FOLD_LINES = 30;
 
 interface HeaderProps {
   info: BlockInfo;
@@ -34,26 +39,24 @@ interface Props {
   block: BlockEntry;
 }
 
-/** 終了したブロック。 */
+/** 終了したブロック。出力は、色付きの静的な HTML で見せる。 */
 export const Block = memo(function Block({ block }: Props) {
   const { info, result } = block;
-  const lines = outputs.get(block.key);
+  const section = useRef<HTMLElement>(null);
+  const output = useOutput(block, section, !result.fullscreen);
 
   // コマンドの外で出た出力 (`.bashrc` の出力など) は、見出しを付けない。
   if (info.command === null) {
-    if (!lines || lines.length === 0) {
-      return null;
-    }
     return (
-      <section className="block block-outside">
-        <Output lines={lines} />
+      <section className="block block-outside" ref={section}>
+        <Output output={output} />
       </section>
     );
   }
 
   const failed = result.exitCode !== null && result.exitCode !== 0;
   return (
-    <section className="block" data-failed={failed}>
+    <section className="block" data-failed={failed} ref={section}>
       <BlockHeader info={info}>
         <span className="block-meta">{formatDuration(result.finishedAt - info.startedAt)}</span>
         {result.exitCode !== null && (
@@ -67,15 +70,105 @@ export const Block = memo(function Block({ block }: Props) {
           全画面で実行しました。画面の内容はブロックに残りません。
         </div>
       ) : (
-        <Output lines={lines} />
+        <Output output={output} />
       )}
     </section>
   );
 });
 
-function Output({ lines }: { lines: string[] | undefined }) {
-  if (!lines || lines.length === 0) {
+/** まだ取っていない / もう残っていない。 */
+type OutputState = Rendered | "pending" | "gone";
+
+/**
+ * ブロックの出力。開き直して戻したブロックは、画面に入ったときにデーモンから取る
+ * (数百ブロックを戻しても、見えないぶんは変換しない)。
+ */
+function useOutput(
+  block: BlockEntry,
+  section: React.RefObject<HTMLElement | null>,
+  wanted: boolean,
+): OutputState {
+  const session = useBlockSession();
+  const [output, setOutput] = useState<OutputState>(() => outputs.get(block.key) ?? "pending");
+  // 読み込む前の高さ。上にあるブロックが伸びたぶん、一覧を送り直すために使う。
+  const heightBefore = useRef<number | null>(null);
+
+  useEffect(() => {
+    const element = section.current;
+    if (!wanted || output !== "pending" || !session || !element) {
+      return;
+    }
+    let cancelled = false;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) {
+          return;
+        }
+        observer.disconnect();
+        void session.loadOutput(block).then((rendered) => {
+          if (!cancelled) {
+            heightBefore.current = element.offsetHeight;
+            setOutput(rendered ?? "gone");
+          }
+        });
+      },
+      { rootMargin: "600px 0px" },
+    );
+    observer.observe(element);
+    return () => {
+      cancelled = true;
+      observer.disconnect();
+    };
+  }, [block, output, section, session, wanted]);
+
+  // WebKit は、上の要素が伸びても見ている場所を保たない。見ている場所より上のブロックが
+  // 伸びたら、そのぶん一覧を送って、見ているものが動かないようにする。
+  useLayoutEffect(() => {
+    const element = section.current;
+    const before = heightBefore.current;
+    heightBefore.current = null;
+    const list = element?.closest(".blocks");
+    if (!element || before === null || !list) {
+      return;
+    }
+    if (element.getBoundingClientRect().top < list.getBoundingClientRect().top) {
+      list.scrollTop += element.offsetHeight - before;
+    }
+  }, [output, section]);
+
+  return output;
+}
+
+function Output({ output }: { output: OutputState }) {
+  const [expanded, setExpanded] = useState(false);
+  if (output === "pending") {
+    return <div className="block-note">出力を読み込んでいます…</div>;
+  }
+  if (output === "gone") {
+    return <div className="block-note">出力は残っていません</div>;
+  }
+  if (output.lines.length === 0) {
     return null;
   }
-  return <pre className="block-output">{lines.join("\n")}</pre>;
+  const hidden = Math.max(0, output.lines.length - FOLD_LINES);
+  const lines = expanded || hidden === 0 ? output.lines : output.lines.slice(-FOLD_LINES);
+  return (
+    <>
+      {output.omitted && (expanded || hidden === 0) && (
+        <div className="block-note">先頭の出力は省かれています</div>
+      )}
+      {hidden > 0 && !expanded && <div className="block-note">… 上に {hidden} 行</div>}
+      <pre className="block-output" dangerouslySetInnerHTML={{ __html: lines.join("\n") }} />
+      {hidden > 0 && (
+        <div className="block-fold">
+          <button type="button" onClick={() => setExpanded(!expanded)}>
+            <svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true">
+              <path d={expanded ? "M6 15l6-6 6 6" : "M6 9l6 6 6-6"} />
+            </svg>
+            {expanded ? "折りたたむ" : `すべて表示 (${output.lines.length} 行)`}
+          </button>
+        </div>
+      )}
+    </>
+  );
 }

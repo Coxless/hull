@@ -13,11 +13,13 @@ import {
   InputQueue,
   appOptions,
   attach,
+  blockOutput,
   resize,
   run,
   type AttachInfo,
   type ControlEvent,
 } from "./pty";
+import { MAX_LINES, renderBuffer, type Rendered } from "./render";
 import { enableRenderer, flushWebglRenders } from "./renderer";
 import { outputs, useSession, type BlockEntry } from "./store";
 import { attachTerminalKeys, encodeBinary, encodeData } from "./terminalKeys";
@@ -64,6 +66,13 @@ export class BlockSession {
   /** 実行中のブロックの、見せる高さを決める要素。 */
   private clip: HTMLElement | null = null;
 
+  /** 開き直して戻したブロックの出力を HTML にするための、画面に出さない端末。 */
+  private offscreen: Terminal | null = null;
+  /** 出力を取っている最中のブロック。同じブロックを二重に取らないために持つ。 */
+  private readonly loading = new Map<string, Promise<Rendered | null>>();
+  /** 画面に出さない端末は1つなので、変換は1つずつ行う。 */
+  private conversions: Promise<unknown> = Promise.resolve();
+
   /**
    * @param sizer ブロック1つが使える最大の大きさを持つ、見えない要素。列数と行数はここから決める。
    *   実行中のブロックがない間は、xterm.js をここに置いておく。
@@ -80,7 +89,7 @@ export class BlockSession {
       cursorBlink: true,
       fontFamily: FONT_FAMILY,
       fontSize: FONT_SIZE,
-      scrollback: 10_000,
+      scrollback: MAX_LINES,
       theme: terminalTheme(PANEL),
     });
     // 絵文字や全角文字の幅を新しい Unicode の定義で数える。
@@ -129,6 +138,7 @@ export class BlockSession {
       subscription.dispose();
     }
     this.term.dispose();
+    this.offscreen?.dispose();
     this.host.remove();
   }
 
@@ -258,7 +268,8 @@ export class BlockSession {
         }
         const entry: BlockEntry = { key: running.key, info: running.info, result: event.result };
         if (!event.result.fullscreen) {
-          outputs.set(entry.key, this.snapshot());
+          // 載っていた xterm.js の内容を、そのまま変換する。
+          outputs.set(entry.key, renderBuffer(this.term.buffer.normal));
         }
         useSession.setState({ blocks: [...blocks, entry], running: null });
         break;
@@ -284,17 +295,60 @@ export class BlockSession {
     this.updateClip();
   }
 
-  /** 端末に残っている出力を、1行ずつの文字列にする (末尾の空行は落とす)。 */
-  private snapshot(): string[] {
-    const buffer = this.term.buffer.normal;
-    const lines: string[] = [];
-    for (let y = 0; y < buffer.length; y++) {
-      lines.push(buffer.getLine(y)?.translateToString(true) ?? "");
+  /**
+   * 開き直して戻したブロックの出力を、デーモンから取って HTML にする。
+   * 前の bash のブロックなど、もう取れないものは null。結果は `outputs` にも入れる。
+   */
+  loadOutput(block: BlockEntry): Promise<Rendered | null> {
+    const cached = outputs.get(block.key);
+    if (cached) {
+      return Promise.resolve(cached);
     }
-    while (lines.length > 0 && lines[lines.length - 1] === "") {
-      lines.pop();
+    let loading = this.loading.get(block.key);
+    if (!loading) {
+      loading = this.fetchOutput(block).finally(() => this.loading.delete(block.key));
+      this.loading.set(block.key, loading);
     }
-    return lines;
+    return loading;
+  }
+
+  private async fetchOutput(block: BlockEntry): Promise<Rendered | null> {
+    const current = block.key === this.key(block.info.id);
+    if (!current || useSession.getState().connection !== "connected") {
+      return null;
+    }
+    try {
+      const { data, truncated } = await blockOutput(block.info.id);
+      const convert = this.conversions.then(() => this.convert(block, data, truncated));
+      this.conversions = convert.catch(() => undefined);
+      const rendered = await convert;
+      outputs.set(block.key, rendered);
+      return rendered;
+    } catch {
+      return null;
+    }
+  }
+
+  /** 出力を、実行したときの幅の端末に通して HTML にする。 */
+  private convert(block: BlockEntry, data: Uint8Array, truncated: boolean): Promise<Rendered> {
+    const cols = Math.max(MIN_COLS, block.info.cols);
+    const rows = Math.max(MIN_ROWS, block.info.rows);
+    // 開かない (`open` を呼ばない) 端末は、描画をせずに出力の解釈だけを行う。
+    this.offscreen ??= new Terminal({ allowProposedApi: true, cols, rows, scrollback: MAX_LINES });
+    const offscreen = this.offscreen;
+    if (!offscreen.unicode.versions.includes("11")) {
+      offscreen.loadAddon(new Unicode11Addon());
+      offscreen.unicode.activeVersion = "11";
+    }
+    offscreen.reset();
+    offscreen.resize(cols, rows);
+    return new Promise((resolve) => {
+      offscreen.write(data, () => {
+        const rendered = renderBuffer(offscreen.buffer.normal);
+        offscreen.reset();
+        resolve({ lines: rendered.lines, omitted: rendered.omitted || truncated });
+      });
+    });
   }
 
   /** 入力欄のテキストを実行する。受け付けられる状態でなければ false。 */
