@@ -299,10 +299,14 @@ pub struct AttachInfo {
 pub struct AppOptions {
     /// 描画方法 (`webgl` / `dom`)。`None` なら WebGL を試し、使えなければ DOM にする。
     renderer: Option<String>,
+    /// 生の表示で始める。
+    raw: bool,
 }
 
 /// 描画方法を指定する環境変数 (`webgl` / `dom`)。
 const RENDERER_ENV: &str = "HULL_TERMINAL_RENDERER";
+/// 表示を指定する環境変数。`raw` なら、区切りを通さない生の表示で始める。
+const MODE_ENV: &str = "HULL_TERMINAL_MODE";
 
 #[tauri::command]
 pub fn app_options() -> AppOptions {
@@ -310,7 +314,8 @@ pub fn app_options() -> AppOptions {
         .ok()
         .filter(|v| !v.is_empty())
         .or_else(|| (!daemon::gpu_available()).then(|| "dom".to_string()));
-    AppOptions { renderer }
+    let raw = std::env::var(MODE_ENV).is_ok_and(|mode| mode == "raw");
+    AppOptions { renderer, raw }
 }
 
 /// デーモンに接続し (いなければ起動し)、画面をつなぐ。

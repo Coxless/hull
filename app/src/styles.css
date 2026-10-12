@@ -1,9 +1,36 @@
 :root {
-  --bg: #1a1714;
-  --bar: #14110f;
-  --border: #2e2823;
-  --text: #9a8f83;
-  --accent: #ff8a3d;
+  --bg: #141316;
+  --panel: #1d1c21;
+  --bar: #1a191d;
+  --border: #2c2a31;
+  --border-soft: #26242b;
+  --text: #e7e2d9;
+  --text-soft: #c9c3b8;
+  --mute: #8f8a82;
+  --accent: #e6b562;
+  --accent-ink: #1a1408;
+  --ok: #7cc4a4;
+  --err: #f2946d;
+  --info: #8ab8ec;
+
+  --ui-font: "IBM Plex Sans JP", system-ui, "BIZ UDGothic", "Noto Sans CJK JP", sans-serif;
+  --mono-font:
+    "JetBrains Mono", "BIZ UDGothic", "Noto Sans Mono CJK JP", "Cascadia Mono", Consolas,
+    "DejaVu Sans Mono", monospace;
+  --mono-size: 13px;
+  /* 端末の1行の高さ。xterm.js を開いたあとで、実際の値に置き換える。 */
+  --cell-height: 17px;
+
+  /* ブロックの一覧と、ブロックの中の余白。実行中のブロックが使える大きさの計算にも使う。 */
+  --list-pad-top: 20px;
+  --list-pad-x: 24px;
+  --list-pad-bottom: 12px;
+  --list-scrollbar: 10px;
+  --block-head-height: 46px;
+  --block-pad-left: 36px;
+  --block-pad-right: 14px;
+  --block-pad-bottom: 12px;
+
   color-scheme: dark;
 }
 
@@ -14,6 +41,18 @@ body,
   margin: 0;
   overflow: hidden;
   background: var(--bg);
+  color: var(--text);
+  font-family: var(--ui-font);
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
 }
 
 .app {
@@ -21,6 +60,8 @@ body,
   flex-direction: column;
   height: 100%;
 }
+
+/* 生の表示 */
 
 .terminal-host {
   flex: 1;
@@ -32,15 +73,265 @@ body,
   height: 100%;
 }
 
+/* 行数で割り切れない余りの部分が、xterm.js の既定の黒で塗られないようにする。 */
+.terminal-host .xterm .xterm-viewport {
+  background-color: var(--bg) !important;
+}
+
+/* ブロックの一覧 */
+
+.blocks-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.blocks {
+  position: absolute;
+  inset: 0;
+  overflow-y: scroll;
+  padding: var(--list-pad-top) calc(var(--list-pad-x) - var(--list-scrollbar))
+    var(--list-pad-bottom) var(--list-pad-x);
+}
+
+.blocks::-webkit-scrollbar {
+  width: var(--list-scrollbar);
+}
+
+.blocks::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 8px;
+  background: #2e2c33;
+  background-clip: padding-box;
+}
+
+.blocks-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.blocks-empty {
+  padding: 48px 0;
+  color: var(--mute);
+  font-size: 13px;
+  text-align: center;
+}
+
+/*
+ * 実行中のブロック1つが使える最大の大きさ。一覧の表示領域から、一覧の余白・ブロックの枠・
+ * 見出し・ブロックの中の余白を引いたもの。ここから端末の列数と行数を決める。
+ * 実行中のブロックがない間は、xterm.js をここに置いて隠しておく。
+ */
+.blocks-sizer {
+  position: absolute;
+  top: calc(var(--list-pad-top) + 1px + var(--block-head-height));
+  right: calc(var(--list-pad-x) + 1px + var(--block-pad-right));
+  bottom: calc(var(--list-pad-bottom) + 1px + var(--block-pad-bottom));
+  left: calc(var(--list-pad-x) + 1px + var(--block-pad-left));
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* ブロック */
+
+.block {
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.block[data-failed="true"] {
+  border-color: #5a3a30;
+}
+
+.block[data-running="true"] {
+  border-color: #4a3f2b;
+}
+
+.block-head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  box-sizing: border-box;
+  height: var(--block-head-height);
+  padding: 2px 14px 0;
+}
+
+.block-mark {
+  color: var(--accent);
+  font-family: var(--mono-font);
+  font-size: 13px;
+}
+
+.block-command {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--mono-font);
+  font-size: 13.5px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+
+.block-command-unknown {
+  color: var(--mute);
+  font-family: var(--ui-font);
+  font-size: 12.5px;
+  font-weight: 400;
+}
+
+.block-meta {
+  color: var(--mute);
+  font-family: var(--mono-font);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.block-pill {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(124, 196, 164, 0.12);
+  color: var(--ok);
+  font-family: var(--mono-font);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.block-pill[data-kind="failed"] {
+  background: rgba(242, 148, 109, 0.16);
+  color: var(--err);
+}
+
+.block-pill[data-kind="running"] {
+  background: rgba(230, 181, 98, 0.16);
+  color: var(--accent);
+}
+
+.block-output {
+  margin: 0;
+  padding: 0 var(--block-pad-right) var(--block-pad-bottom) var(--block-pad-left);
+  overflow-x: auto;
+  color: var(--text);
+  font-family: var(--mono-font);
+  font-size: var(--mono-size);
+  line-height: var(--cell-height);
+  white-space: pre;
+}
+
+.block-outside {
+  border-style: dashed;
+  background: transparent;
+}
+
+.block-outside .block-output,
+.block-outside .block-terminal {
+  padding-top: var(--block-pad-bottom);
+  color: var(--mute);
+}
+
+.block-fullscreen {
+  margin: 0 var(--block-pad-right) var(--block-pad-bottom) var(--block-pad-left);
+  padding: 10px 12px;
+  border: 1px dashed #36333c;
+  border-radius: 8px;
+  background: #17161a;
+  color: #a39d93;
+  font-size: 12px;
+}
+
+.block-terminal {
+  padding: 0 var(--block-pad-right) var(--block-pad-bottom) var(--block-pad-left);
+}
+
+.block-terminal-clip {
+  overflow: hidden;
+}
+
+/* 入力欄 */
+
+.composer {
+  flex-shrink: 0;
+  padding: 8px var(--list-pad-x) 14px;
+}
+
+.composer-box {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #34313a;
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.composer-box[data-active="true"] {
+  border-color: #4a4450;
+}
+
+.composer-box:focus-within {
+  border-color: #6a5a3a;
+}
+
+.composer-input {
+  padding: 12px 14px 4px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--mono-font);
+  font-size: 14px;
+  line-height: 1.6;
+  resize: none;
+}
+
+.composer-input::placeholder {
+  color: var(--mute);
+}
+
+.composer-foot {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  padding: 4px 8px 8px 14px;
+  color: var(--mute);
+  font-size: 11.5px;
+  user-select: none;
+}
+
+.composer-spacer {
+  flex: 1;
+}
+
+.composer-run {
+  height: 30px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.composer-run:disabled {
+  background: #3a3740;
+  color: var(--mute);
+}
+
+/* ステータスバー */
+
 .statusbar {
   display: flex;
   gap: 12px;
   align-items: center;
   height: 22px;
   padding: 0 10px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--border-soft);
   background: var(--bar);
-  color: var(--text);
+  color: var(--mute);
   font:
     11px/1 system-ui,
     "BIZ UDGothic",
@@ -60,14 +351,9 @@ body,
   height: 7px;
   margin-right: 6px;
   border-radius: 50%;
-  background: var(--text);
+  background: var(--mute);
 }
 
 .statusbar[data-state="running"] .statusbar-state::before {
   background: var(--accent);
-}
-
-/* 行数で割り切れない余りの部分が、xterm.js の既定の黒で塗られないようにする。 */
-.terminal-host .xterm .xterm-viewport {
-  background-color: var(--bg) !important;
 }
