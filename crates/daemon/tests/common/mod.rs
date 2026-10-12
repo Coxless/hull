@@ -33,7 +33,12 @@ pub fn start_daemon() -> Daemon {
 pub fn start_daemon_with(ring_capacity: usize) -> Daemon {
     let dir = tempfile::tempdir().unwrap();
     let endpoint = test_endpoint(&dir);
-    let config = Config { endpoint: endpoint.clone(), shell: Some(test_shell()), ring_capacity };
+    let config = Config {
+        endpoint: endpoint.clone(),
+        shell: Some(test_shell()),
+        ring_capacity,
+        ..Config::default()
+    };
     Daemon { endpoint, handle: tokio::spawn(run(config)), dir }
 }
 
@@ -42,6 +47,11 @@ pub fn start_daemon_with(ring_capacity: usize) -> Daemon {
 /// 開発者の設定に左右されないよう、ホームディレクトリを空の場所に移し、
 /// そこに `bashrc` の内容の `.bashrc` を置く。
 pub fn start_integrated_daemon(bashrc: &str) -> Daemon {
+    start_integrated_daemon_with(bashrc, |config| config)
+}
+
+/// [`start_integrated_daemon`] と同じ。`adjust` で設定を変えられる。
+pub fn start_integrated_daemon_with(bashrc: &str, adjust: impl FnOnce(Config) -> Config) -> Daemon {
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path().join("home");
     std::fs::create_dir(&home).unwrap();
@@ -53,7 +63,7 @@ pub fn start_integrated_daemon(bashrc: &str) -> Daemon {
 
     let endpoint = test_endpoint(&dir);
     let config =
-        Config { endpoint: endpoint.clone(), shell: Some(shell), ring_capacity: 1024 * 1024 };
+        adjust(Config { endpoint: endpoint.clone(), shell: Some(shell), ..Config::default() });
     Daemon { endpoint, handle: tokio::spawn(run(config)), dir }
 }
 
@@ -70,10 +80,11 @@ pub fn test_endpoint(dir: &tempfile::TempDir) -> String {
     dir.path().join(format!("daemon-{n}.sock")).to_string_lossy().into_owned()
 }
 
-/// 開発者の `.bashrc` に左右されないよう、設定を読まずに起動する。
+/// 開発者の `.bashrc` に左右されないよう、設定も統合スクリプトも読まずに起動する。
 pub fn test_shell() -> ShellSpec {
     let mut shell = ShellSpec::detect().expect("bash が見つかりません");
     shell.args = vec!["--norc".into(), "--noprofile".into(), "-i".into()];
+    shell.integration = false;
     shell
 }
 
@@ -111,7 +122,7 @@ impl Client {
 
     /// Attach を送り、Replay の中身を返す。
     pub async fn attach(&mut self, cols: u16, rows: u16) -> Vec<u8> {
-        self.send(ClientMessage::Attach { cols, rows }).await;
+        self.send(ClientMessage::Attach { cols, rows, raw: true }).await;
         match self.next_message().await {
             Some(ServerMessage::Replay { data }) => {
                 self.output.extend(&data);

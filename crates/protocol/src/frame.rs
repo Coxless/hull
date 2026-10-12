@@ -116,12 +116,18 @@ pub async fn write_frame<W: AsyncWrite + Unpin, T: Serialize>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ClientMessage, ServerMessage, PROTOCOL_VERSION};
+    use crate::{
+        BlockInfo, BlockResult, ClientMessage, FinishedBlock, PromptState, RunRejection,
+        ServerMessage, PROTOCOL_VERSION,
+    };
 
     fn client_messages() -> Vec<ClientMessage> {
         vec![
             ClientMessage::Hello { version: PROTOCOL_VERSION },
-            ClientMessage::Attach { cols: 120, rows: 40 },
+            ClientMessage::Attach { cols: 120, rows: 40, raw: false },
+            ClientMessage::Attach { cols: 80, rows: 24, raw: true },
+            ClientMessage::Run { text: "echo 日本語\necho b".into() },
+            ClientMessage::FetchOutput { id: 12 },
             ClientMessage::Input { data: b"ls -la\r".to_vec() },
             ClientMessage::Input { data: vec![0x00, 0x1b, 0xff, 0x80] },
             ClientMessage::Resize { cols: 80, rows: 24 },
@@ -135,14 +141,50 @@ mod tests {
                 version: PROTOCOL_VERSION,
                 daemon_version: "0.1.0".into(),
                 pid: Some(4242),
+                integrated: true,
             },
-            ServerMessage::Welcome { version: 1, daemon_version: String::new(), pid: None },
+            ServerMessage::Welcome {
+                version: 1,
+                daemon_version: String::new(),
+                pid: None,
+                integrated: false,
+            },
             ServerMessage::Replay { data: vec![b'x'; 70_000] },
             ServerMessage::Output { data: "日本語 \x1b[31mred\x1b[0m".as_bytes().to_vec() },
             ServerMessage::Output { data: Vec::new() },
             ServerMessage::Exited { code: 130 },
             ServerMessage::Error { message: "バージョンが違います".into() },
+            ServerMessage::History {
+                blocks: vec![FinishedBlock { info: block(1, Some("ls")), result: result(Some(0)) }],
+                running: Some(block(2, None)),
+                prompt: PromptState { cwd: Some("/tmp".into()), branch: Some("main".into()) },
+                ready: false,
+            },
+            ServerMessage::Prompt { prompt: PromptState::default() },
+            ServerMessage::BlockStarted { block: block(3, Some("")) },
+            ServerMessage::BlockFinished { id: 3, result: result(None) },
+            ServerMessage::BlockOutput { id: 3, data: vec![0x1b, 0xff], truncated: true },
+            ServerMessage::RunRejected {
+                reason: RunRejection::Incomplete,
+                text: "echo \"a".into(),
+            },
+            ServerMessage::RunRejected { reason: RunRejection::Busy, text: String::new() },
         ]
+    }
+
+    fn block(id: u64, command: Option<&str>) -> BlockInfo {
+        BlockInfo {
+            id,
+            command: command.map(Into::into),
+            cwd: Some("/home/me".into()),
+            started_at: 1_760_000_000_000,
+            cols: 120,
+            rows: 40,
+        }
+    }
+
+    fn result(exit_code: Option<i32>) -> BlockResult {
+        BlockResult { exit_code, finished_at: 1_760_000_000_123, fullscreen: exit_code.is_none() }
     }
 
     #[test]
@@ -239,7 +281,7 @@ mod tests {
         }
         let frame = encode(&Newer::Attach { cols: 80, rows: 24, pixel_width: 640 }).unwrap();
         let decoded: ClientMessage = decode(&frame[HEADER_LEN..]).unwrap();
-        assert_eq!(decoded, ClientMessage::Attach { cols: 80, rows: 24 });
+        assert_eq!(decoded, ClientMessage::Attach { cols: 80, rows: 24, raw: false });
     }
 
     #[tokio::test]

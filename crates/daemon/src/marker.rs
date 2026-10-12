@@ -179,6 +179,19 @@ fn percent_decode(text: &[u8]) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// 画面に見える文字 (空白と制御シーケンスを除く) が入っているか。
+pub(crate) fn has_visible_text(bytes: &[u8]) -> bool {
+    struct Visible(bool);
+    impl Perform for Visible {
+        fn print(&mut self, c: char) {
+            self.0 |= !c.is_whitespace();
+        }
+    }
+    let mut visible = Visible(false);
+    Parser::new().advance(&mut visible, bytes);
+    visible.0
+}
+
 /// 出力を合図の位置で区切る。
 pub(crate) struct Splitter {
     parser: Parser,
@@ -208,24 +221,9 @@ impl Splitter {
         }
     }
 
-    /// コマンドを実行している最中か。
-    pub fn is_running(&self) -> bool {
-        self.state == State::Running
-    }
-
     /// プロンプトを表示して、入力を待っているか。
     pub fn is_at_prompt(&self) -> bool {
         self.state == State::Prompt
-    }
-
-    /// 最後に届いたディレクトリと git ブランチ。
-    pub fn prompt(&self) -> &PromptInfo {
-        &self.prompt
-    }
-
-    /// 実行中のコマンドが代替画面を使ったか。
-    pub fn fullscreen(&self) -> bool {
-        self.fullscreen
     }
 
     /// PTY から読んだバイト列を渡す。区切った結果を `out` の後ろに足す。
@@ -308,7 +306,10 @@ impl Splitter {
                 self.state = State::Prompt;
                 out.push(Item::Event(Event::Prompt(self.prompt.clone())));
             }
-            (Mark::Continuation, State::Prompt) => out.push(Item::Event(Event::Continuation)),
+            // 実行中に来るのは、貼り付けた複数行の途中までが実行され、最後の行が途中だったとき。
+            (Mark::Continuation, State::Prompt | State::Running) => {
+                out.push(Item::Event(Event::Continuation));
+            }
             (Mark::CommandStart, State::Prompt | State::Between) => {
                 self.state = State::Running;
                 self.fullscreen = false;
@@ -517,6 +518,23 @@ mod tests {
     }
 
     #[test]
+    fn an_unfinished_last_line_of_a_running_paste_is_announced() {
+        let stream = [&startup(), &mark("C"), "a\r\n", &mark("A;k=c"), "> "].concat();
+        assert_eq!(
+            split(stream)[1..],
+            [started(), output("a\r\n"), Item::Event(Event::Continuation), output("> ")]
+        );
+    }
+
+    #[test]
+    fn visible_text_ignores_blanks_and_control_sequences() {
+        assert!(!has_visible_text(b""));
+        assert!(!has_visible_text(b"\r\n \t\x1b[?2004h\x1b]0;title\x07\x1b[0m"));
+        assert!(has_visible_text(b"\x1b[31mwelcome\x1b[0m\r\n"));
+        assert!(has_visible_text("\r\nようこそ".as_bytes()));
+    }
+
+    #[test]
     fn marks_with_another_nonce_stay_in_the_output() {
         let forged = "\x1b]133;D;0;hull=ffff\x07\x1b]133;D;0\x07\x1b]133;A\x07";
         let stream = [&startup(), &mark("C"), "a", forged, "b", &next_prompt(0)].concat();
@@ -606,10 +624,9 @@ mod tests {
         let mut splitter = Splitter::new(NONCE);
         let mut items = Vec::new();
         splitter.feed(startup().as_bytes(), &mut items);
-        assert!(splitter.is_at_prompt() && !splitter.is_running());
-        assert_eq!(splitter.prompt().cwd.as_deref(), Some("/home/me"));
+        assert!(splitter.is_at_prompt());
 
-        splitter.feed([&mark("C"), "\x1b[?1049h"].concat().as_bytes(), &mut items);
-        assert!(splitter.is_running() && splitter.fullscreen());
+        splitter.feed(mark("C").as_bytes(), &mut items);
+        assert!(!splitter.is_at_prompt());
     }
 }

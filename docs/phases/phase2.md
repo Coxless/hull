@@ -58,7 +58,7 @@ app/src/
 
 スクリプトがすることは次のとおりです。
 
-1. `/etc/bash.bashrc` と `~/.bashrc` を読む（`--rcfile` を付けると bash はどちらも読まなくなるため）
+1. `~/.bashrc` を読む（`--rcfile` を付けると bash は読まなくなるため。`/etc/bash.bashrc` は、Ubuntu の bash が `--rcfile` を付けても自分で読むので、スクリプトでは読まない）
 2. `PROMPT_COMMAND` の先頭に自分の関数を足す。関数は直前の終了コードを D として出し、同じ終了コードを返す（ユーザーの `PROMPT_COMMAND` や `PS1` が `$?` を見ても変わらない）。`PROMPT_COMMAND` が文字列でも配列でも動くようにする
 3. `PS1` の前後に A と B、`PS2` の前に「続きの入力」の合図、`PS0` に C を入れる
 4. プロンプトのたびに、OSC 7 で今のディレクトリを、独自の OSC で git ブランチを出す
@@ -115,10 +115,12 @@ C → D の間に代替画面への切り替え（`CSI ? 1049 h` など）があ
 | デーモン → UI | Output | 実行中ブロックの出力（生の表示では、Phase 1 と同じくすべての出力） |
 | デーモン → UI | BlockFinished | 番号、終了コード、終了時刻、全画面アプリかどうか |
 | デーモン → UI | BlockOutput | FetchOutput への応答。出力のバイト列と、先頭を省いたかどうか |
-| デーモン → UI | RunRejected | 実行しなかった理由（入力が途中、実行中で受け付けられない） |
+| デーモン → UI | RunRejected | 実行しなかった理由（入力が途中、実行中で受け付けられない）と、送られてきたテキスト |
 | デーモン → UI | Completions | 補完の候補 |
 
-Hello / Welcome / Input / Resize / Detach / Replay / Exited / Error は変えません。Replay は、生の表示の流し直しと、実行中ブロックのここまでの出力の流し直しに使います。
+Hello / Input / Resize / Detach / Replay / Exited / Error は変えません。Welcome には、bash が統合スクリプトを読み込んでいるかどうかを足します。Replay は、生の表示の流し直しと、実行中ブロックのここまでの出力の流し直しに使います。
+
+「ブロック外の出力」は、専用のメッセージを設けず、コマンドのないブロックとして BlockStarted → Output → BlockFinished を続けて送ります。画面に見える文字がないとき（改行やモードの切り替えだけのとき）は送りません。入力欄を通さずに実行されたコマンド（生の表示で打ったもの）は、コマンドが空のブロックになります。
 
 Tauri の Rust コアは、出力のバイト列だけを今までどおり Channel でそのまま渡し、ほかの知らせは JSON で渡します。描き終えた量を知らせる仕組み（ack）は出力にだけ使います。
 

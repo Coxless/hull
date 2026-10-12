@@ -20,4 +20,7 @@ pub mod transport;
 
 pub use endpoint::{default_endpoint, state_dir, ENDPOINT_ENV};
 pub use frame::{decode, encode, read_frame, write_frame, FrameDecoder, FrameError, MAX_FRAME_LEN};
-pub use message::{ClientMessage, ServerMessage, PROTOCOL_VERSION};
+pub use message::{
+    BlockInfo, BlockResult, ClientMessage, FinishedBlock, PromptState, RunRejection, ServerMessage,
+    PROTOCOL_VERSION,
+};

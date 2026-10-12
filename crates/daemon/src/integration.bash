@@ -10,10 +10,9 @@
 #   OSC 7       今のディレクトリ
 #   OSC 7133    git ブランチ (hull-terminal 独自)
 
-# `--rcfile` を付けると bash はどちらも読まないので、ここで読む。
-if [[ -r /etc/bash.bashrc ]]; then
-  . /etc/bash.bashrc
-fi
+# `--rcfile` を付けると bash は ~/.bashrc を読まないので、ここで読む。
+# /etc/bash.bashrc は、Ubuntu の bash が `--rcfile` を付けても自分で読むので、ここでは読まない
+# (読むと2回実行されて、sudo の案内などが2回出る)。
 if [[ -r ~/.bashrc ]]; then
   . ~/.bashrc
 fi
