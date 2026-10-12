@@ -4,6 +4,9 @@
 //! bash が終わったらデーモンも終わる。
 
 mod integration;
+// セッションにつなぐのは、ブロックの管理を入れるとき (Phase 2 の作業3)。
+#[allow(dead_code)]
+mod marker;
 mod ring;
 mod server;
 mod session;

@@ -11,6 +11,7 @@ anyhow = "1"
 hull-terminal-protocol.workspace = true
 portable-pty = "0.9"
 tokio.workspace = true
+vte = "0.15"
 
 [dev-dependencies]
 tempfile = "3"
