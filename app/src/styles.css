@@ -506,6 +506,8 @@ button:disabled {
 
 .composer-notice {
   color: var(--err);
+  line-height: 1.5;
+  user-select: text;
 }
 
 .composer-input {

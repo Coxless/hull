@@ -225,7 +225,7 @@ export function InputBox() {
   } else if (connection === "exited") {
     placeholder = `bash が終了しました (終了コード ${exitCode ?? "?"})。Enter で新しい bash を起動します`;
   } else if (connection === "disconnected") {
-    placeholder = `${problem ?? "デーモンとの接続が切れました"}。Enter でつなぎ直します`;
+    placeholder = "デーモンにつながっていません。Enter でつなぎ直します";
   } else if (running) {
     placeholder = "キー入力は、実行中のブロックに届きます";
   } else if (pending) {
@@ -233,6 +233,9 @@ export function InputBox() {
   } else if (!ready) {
     placeholder = "bash の準備を待っています…";
   }
+
+  // つなげなかった理由 (版の違いなど) は長いので、入力欄の下に折り返して出す。
+  const footNotice = notice ?? (connection === "disconnected" ? problem : null);
 
   return (
     <div className="composer">
@@ -307,8 +310,8 @@ export function InputBox() {
           </div>
         )}
         <div className="composer-foot">
-          {notice ? (
-            <span className="composer-notice">{notice}</span>
+          {footNotice ? (
+            <span className="composer-notice">{footNotice}</span>
           ) : (
             <>
               <span>Enter 実行</span>
