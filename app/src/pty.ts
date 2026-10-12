@@ -30,26 +30,31 @@ export function appOptions(): Promise<AppOptions> {
 
 /** デーモンに接続して画面をつなぐ。 */
 export function attach(cols: number, rows: number, handlers: PtyHandlers): Promise<AttachInfo> {
-  const onEvent = new Channel<ArrayBuffer | number[] | ControlEvent>();
-  let replayed = false;
+  const onEvent = new Channel<ArrayBuffer | number[] | ControlEvent | { type: "replay" }>();
+  // `replay` の知らせの次のバイト列が、直前の画面を戻すための出力。
+  let replayNext = false;
   onEvent.onmessage = (message) => {
     let data: Uint8Array;
     if (message instanceof ArrayBuffer) {
       data = new Uint8Array(message);
     } else if (Array.isArray(message)) {
       data = Uint8Array.from(message);
+    } else if (message.type === "replay") {
+      replayNext = true;
+      return;
     } else {
       handlers.onControl(message);
       return;
     }
-    if (replayed) {
-      handlers.onOutput(data);
-    } else {
-      replayed = true;
+    if (replayNext) {
+      replayNext = false;
       handlers.onReplay(data);
+    } else {
+      handlers.onOutput(data);
     }
   };
-  return invoke("pty_attach", { cols, rows, onEvent });
+  // ブロックの画面ができるまでは、生の表示でつなぐ。
+  return invoke("pty_attach", { cols, rows, raw: true, onEvent });
 }
 
 export function resize(cols: number, rows: number): void {

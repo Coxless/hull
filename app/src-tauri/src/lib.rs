@@ -1,7 +1,7 @@
 //! hull-terminal の UI 側の Rust コア。
 //!
-//! デーモンに接続し (いなければ起動し)、PTY の出力をフロントへ流し、
-//! フロントからの入力とリサイズをデーモンへ送る。
+//! デーモンに接続し (いなければ起動し)、PTY の出力とブロックの知らせをフロントへ流し、
+//! フロントからの入力・リサイズ・実行するテキストをデーモンへ送る。
 
 mod daemon;
 mod pty;
@@ -18,6 +18,8 @@ pub fn run() {
             pty::pty_input,
             pty::pty_resize,
             pty::pty_ack,
+            pty::session_run,
+            pty::block_output,
         ])
         .build(tauri::generate_context!())
         .expect("hull-terminal を起動できません")
