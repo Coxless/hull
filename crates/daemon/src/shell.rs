@@ -49,7 +49,8 @@ impl ShellSpec {
         cmd
     }
 
-    fn home_dir(&self) -> Option<PathBuf> {
+    /// bash のホームディレクトリ。`env` で上書きしていなければ、デーモンと同じ。
+    pub(crate) fn home_dir(&self) -> Option<PathBuf> {
         self.env
             .iter()
             .rev()

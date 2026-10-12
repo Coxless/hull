@@ -524,6 +524,31 @@ button:disabled {
   color: var(--mute);
 }
 
+.composer-candidates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 16px;
+  max-height: 110px;
+  margin: 2px 14px 4px;
+  padding-top: 6px;
+  overflow-y: auto;
+  border-top: 1px solid var(--border-soft);
+  color: var(--text-soft);
+  font-family: var(--mono-font);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre;
+}
+
+.composer-candidates [data-directory="true"] {
+  color: var(--info);
+}
+
+.composer-candidates-more {
+  color: var(--mute);
+  font-family: var(--ui-font);
+}
+
 .composer-foot {
   display: flex;
   gap: 14px;

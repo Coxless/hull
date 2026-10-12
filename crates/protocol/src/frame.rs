@@ -128,6 +128,7 @@ mod tests {
             ClientMessage::Attach { cols: 80, rows: 24, raw: true },
             ClientMessage::Run { text: "echo 日本語\necho b".into() },
             ClientMessage::FetchOutput { id: 12 },
+            ClientMessage::Complete { id: 3, text: "cat 日本".into(), cursor: 10 },
             ClientMessage::Input { data: b"ls -la\r".to_vec() },
             ClientMessage::Input { data: vec![0x00, 0x1b, 0xff, 0x80] },
             ClientMessage::Resize { cols: 80, rows: 24 },
@@ -169,6 +170,18 @@ mod tests {
                 text: "echo \"a".into(),
             },
             ServerMessage::RunRejected { reason: RunRejection::Busy, text: String::new() },
+            ServerMessage::Completions {
+                id: 3,
+                start: 4,
+                replacement: "日本".into(),
+                candidates: vec!["日本/".into(), "日本語.txt".into()],
+            },
+            ServerMessage::Completions {
+                id: 4,
+                start: 0,
+                replacement: String::new(),
+                candidates: Vec::new(),
+            },
         ]
     }
 

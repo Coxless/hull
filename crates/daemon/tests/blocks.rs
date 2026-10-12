@@ -551,3 +551,40 @@ async fn without_the_integration_script_run_is_rejected() {
     client.send_bytes(b"exit\r").await;
     assert_eq!(client.next_message().await, Some(ServerMessage::Exited { code: 0 }));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn tab_completion_follows_the_directory_of_bash() {
+    let daemon = start_integrated_daemon(PLAIN_PROMPT);
+    let mut client = attach_ready(&daemon).await;
+    std::fs::create_dir_all(daemon.home().join("work/日本語 メモ")).unwrap();
+    std::fs::write(daemon.home().join("work/notes.txt"), "").unwrap();
+
+    async fn complete(client: &mut Client, id: u64, text: &str) -> (String, Vec<String>) {
+        let cursor = text.len() as u32;
+        client.send(ClientMessage::Complete { id, text: text.into(), cursor }).await;
+        match client.next_message().await {
+            Some(ServerMessage::Completions { id: got, start, replacement, candidates }) => {
+                assert_eq!(got, id);
+                (format!("{}{replacement}", &text[..start as usize]), candidates)
+            }
+            other => panic!("Completions が来るはずが {other:?}"),
+        }
+    }
+
+    // 最初はホームディレクトリにいる。
+    assert_eq!(complete(&mut client, 1, "cd wo").await, ("cd work/".into(), vec![]));
+    assert_eq!(complete(&mut client, 2, "cat no").await, ("cat no".into(), vec![]));
+
+    // cd したあとは、移った先を基準にする。
+    client.send(ClientMessage::Run { text: "cd work".into() }).await;
+    next_prompt(&mut client).await;
+    assert_eq!(complete(&mut client, 3, "cat no").await, ("cat notes.txt ".into(), vec![]));
+    assert_eq!(complete(&mut client, 4, "ls 日").await, ("ls 日本語\\ メモ/".into(), vec![]));
+    assert_eq!(
+        complete(&mut client, 5, "ls ").await,
+        ("ls ".into(), vec!["notes.txt".into(), "日本語 メモ/".into()])
+    );
+    assert_eq!(complete(&mut client, 6, "ls ~/wo").await, ("ls ~/work/".into(), vec![]));
+
+    exit(client).await;
+}

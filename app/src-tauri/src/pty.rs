@@ -4,6 +4,7 @@
 //! JSON で渡す。入力・リサイズ・実行するテキストはコマンドで受けてデーモンへ送る。
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -28,7 +29,7 @@ const HIGH_WATER: usize = 2 * 1024 * 1024;
 const MAX_BATCH: usize = 256 * 1024;
 /// デーモンの応答 (Welcome) を待つ時間。
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
-/// 終了したブロックの出力が返ってくるまで待つ時間。
+/// 終了したブロックの出力や、補完の候補が返ってくるまで待つ時間。
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Default)]
@@ -39,7 +40,10 @@ pub struct PtyState {
 struct Connection {
     outgoing: mpsc::UnboundedSender<ClientMessage>,
     flow: Arc<Flow>,
-    fetches: Arc<Fetches>,
+    fetches: Arc<Waiters<FetchedOutput>>,
+    completions: Arc<Waiters<RawCompletion>>,
+    /// 補完の要求に付ける番号。
+    next_request: AtomicU64,
     reader: JoinHandle<()>,
     writer: JoinHandle<()>,
 }
@@ -83,20 +87,40 @@ struct FetchedOutput {
     truncated: bool,
 }
 
-/// `block_output` が待っている応答。ブロックの番号ごとに持つ。
-#[derive(Default)]
-struct Fetches {
-    waiting: Mutex<HashMap<u64, Vec<oneshot::Sender<FetchedOutput>>>>,
+/// デーモンから届いたままの補完の結果 (置き換える範囲の始まりのバイト位置、置き換える
+/// テキスト、候補)。
+type RawCompletion = (u32, String, Vec<String>);
+
+/// 補完の結果。位置は、フロントの文字列での位置 (UTF-16 の単位) で持つ。
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct Completion {
+    /// 置き換える範囲の始まり。終わりはカーソルの位置。
+    start: u32,
+    /// 置き換えるテキスト。候補がなければ空。
+    replacement: String,
+    /// 候補が複数あるときの一覧 (ディレクトリは末尾に `/`)。
+    candidates: Vec<String>,
 }
 
-impl Fetches {
-    fn wait(&self, id: u64) -> oneshot::Receiver<FetchedOutput> {
+/// コマンドが待っている、デーモンからの応答。番号 (ブロックや要求の番号) ごとに持つ。
+struct Waiters<T> {
+    waiting: Mutex<HashMap<u64, Vec<oneshot::Sender<T>>>>,
+}
+
+impl<T> Default for Waiters<T> {
+    fn default() -> Self {
+        Self { waiting: Mutex::new(HashMap::new()) }
+    }
+}
+
+impl<T> Waiters<T> {
+    fn wait(&self, id: u64) -> oneshot::Receiver<T> {
         let (tx, rx) = oneshot::channel();
         lock(&self.waiting).entry(id).or_default().push(tx);
         rx
     }
 
-    fn resolve(&self, id: u64, data: Vec<u8>, truncated: bool) {
+    fn resolve(&self, id: u64, value: T) {
         // 同じブロックを続けて頼まれていたら、応答も同じ数だけ届く。先に待っていたほうから返す。
         let mut waiting = lock(&self.waiting);
         let Some(queue) = waiting.get_mut(&id) else { return };
@@ -104,7 +128,7 @@ impl Fetches {
         if queue.is_empty() {
             waiting.remove(&id);
         }
-        let _ = waiter.send(FetchedOutput { data, truncated });
+        let _ = waiter.send(value);
     }
 
     /// 接続が切れた。待っているものをすべて失敗させる。
@@ -151,6 +175,18 @@ impl Connection {
         // 応答を取りこぼさないよう、頼む前に受け口を用意する。
         let waiter = self.fetches.wait(id);
         self.send(ClientMessage::FetchOutput { id })?;
+        Ok(waiter)
+    }
+
+    /// 補完を頼む。`cursor` は、`text` の UTF-8 でのバイト位置。
+    fn request_completion(
+        &self,
+        text: String,
+        cursor: u32,
+    ) -> Result<oneshot::Receiver<RawCompletion>, String> {
+        let id = self.next_request.fetch_add(1, Ordering::Relaxed);
+        let waiter = self.completions.wait(id);
+        self.send(ClientMessage::Complete { id, text, cursor })?;
         Ok(waiter)
     }
 
@@ -384,16 +420,21 @@ async fn connect(
     send.flush().await.map_err(|e| io(e.into()))?;
 
     let flow = Arc::new(Flow::default());
-    let fetches = Arc::new(Fetches::default());
+    let fetches = Arc::new(Waiters::default());
+    let completions = Arc::new(Waiters::default());
     let (outgoing, outgoing_rx) = mpsc::unbounded_channel();
     let reader = tauri::async_runtime::spawn(forward_output(
         recv,
         sink,
         Arc::clone(&flow),
         Arc::clone(&fetches),
+        Arc::clone(&completions),
     ));
     let writer = tauri::async_runtime::spawn(forward_input(outgoing_rx, send));
-    Ok((welcome, Connection { outgoing, flow, fetches, reader, writer }))
+    let next_request = AtomicU64::new(1);
+    let connection =
+        Connection { outgoing, flow, fetches, completions, next_request, reader, writer };
+    Ok((welcome, connection))
 }
 
 async fn welcome(recv: &mut BufReader<LocalRecvHalf>) -> Result<Welcome, String> {
@@ -417,7 +458,8 @@ async fn forward_output(
     mut recv: BufReader<LocalRecvHalf>,
     sink: impl EventSink,
     flow: Arc<Flow>,
-    fetches: Arc<Fetches>,
+    fetches: Arc<Waiters<FetchedOutput>>,
+    completions: Arc<Waiters<RawCompletion>>,
 ) {
     let mut batch = Vec::new();
     let flush = |batch: &mut Vec<u8>| {
@@ -460,7 +502,11 @@ async fn forward_output(
                 continue;
             }
             Ok(ServerMessage::BlockOutput { id, data, truncated }) => {
-                fetches.resolve(id, data, truncated);
+                fetches.resolve(id, FetchedOutput { data, truncated });
+                continue;
+            }
+            Ok(ServerMessage::Completions { id, start, replacement, candidates }) => {
+                completions.resolve(id, (start, replacement, candidates));
                 continue;
             }
             Ok(ServerMessage::History { blocks, running, prompt, ready }) => Control::History {
@@ -496,6 +542,7 @@ async fn forward_output(
         }
     };
     fetches.clear();
+    completions.clear();
     if flush(&mut batch) {
         sink.deliver(control(&end));
     }
@@ -565,6 +612,47 @@ pub async fn block_output(state: State<'_, PtyState>, id: u64) -> Result<Respons
     body.push(u8::from(output.truncated));
     body.extend_from_slice(&output.data);
     Ok(Response::new(body))
+}
+
+/// 入力欄の Tab 補完。`text` の `cursor` の直前の単語を、bash の今のディレクトリの
+/// ファイル名として補う。`cursor` と、返す `start` は、フロントの文字列での位置 (UTF-16 の単位)。
+#[tauri::command]
+pub async fn complete(
+    state: State<'_, PtyState>,
+    text: String,
+    cursor: u32,
+) -> Result<Completion, String> {
+    let nothing = || Completion { start: cursor, replacement: String::new(), candidates: vec![] };
+    // デーモンとは、UTF-8 でのバイト位置でやりとりする。
+    let Some(byte_cursor) = utf16_to_byte(&text, cursor as usize) else { return Ok(nothing()) };
+    let waiter = {
+        let guard = lock(&state.connection);
+        let connection = guard.as_ref().ok_or("デーモンにつながっていません")?;
+        connection.request_completion(text.clone(), byte_cursor as u32)?
+    };
+    let (start, replacement, candidates) = tokio::time::timeout(FETCH_TIMEOUT, waiter)
+        .await
+        .map_err(|_| "補完の候補が返ってきません".to_string())?
+        .map_err(|_| "デーモンとの接続が切れました".to_string())?;
+    match text.get(..start as usize) {
+        Some(before) => {
+            let start = before.encode_utf16().count() as u32;
+            Ok(Completion { start, replacement, candidates })
+        }
+        None => Ok(nothing()),
+    }
+}
+
+/// UTF-16 の単位での位置を、UTF-8 でのバイト位置にする。文字の途中や、範囲の外なら `None`。
+fn utf16_to_byte(text: &str, index: usize) -> Option<usize> {
+    let mut units = 0;
+    for (byte, c) in text.char_indices() {
+        if units == index {
+            return Some(byte);
+        }
+        units += c.len_utf16();
+    }
+    (units == index).then_some(text.len())
 }
 
 /// フロントが出力を描き終えたぶんの報告。
@@ -776,6 +864,28 @@ mod tests {
             Event::Bytes(data) => assert_eq!(data, b"waiting-4\r\n"),
             Event::Notice(notice) => panic!("出力が来るはずが {notice}"),
         }
+    }
+
+    #[test]
+    fn utf16_positions_are_converted_to_byte_positions() {
+        // 「日」は UTF-16 で 1、UTF-8 で 3。絵文字は UTF-16 で 2、UTF-8 で 4。
+        let text = "a日😀b";
+        let bytes: Vec<_> = (0..=6).map(|index| utf16_to_byte(text, index)).collect();
+        assert_eq!(bytes, [Some(0), Some(1), Some(4), None, Some(8), Some(9), None]);
+        assert_eq!(utf16_to_byte("", 0), Some(0));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_completion_is_answered_by_the_daemon() {
+        let mut front = attach(false).await;
+        front.ready().await;
+        std::fs::write(front._home.path().join("日本語のメモ.txt"), "").unwrap();
+
+        let text = "cat 日本";
+        let waiter = front.connection.request_completion(text.into(), text.len() as u32).unwrap();
+        let (start, replacement, candidates) = waiter.await.unwrap();
+        assert_eq!((start, replacement.as_str()), (4, "日本語のメモ.txt "));
+        assert!(candidates.is_empty());
     }
 
     #[tokio::test(flavor = "multi_thread")]

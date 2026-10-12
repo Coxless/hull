@@ -114,7 +114,7 @@ async fn serve_client(recv: LocalRecvHalf, send: LocalSendHalf, session: Arc<Ses
 async fn client_loop(
     recv: LocalRecvHalf,
     send: LocalSendHalf,
-    session: &Session,
+    session: &Arc<Session>,
 ) -> anyhow::Result<()> {
     let mut writer = BufWriter::new(send);
 
@@ -185,6 +185,22 @@ async fn client_loop(
                         write_frame(&mut writer, &message).await?;
                         writer.flush().await?;
                     }
+                }
+                Some(ClientMessage::Complete { id, text, cursor }) => {
+                    // ディレクトリの読み取りは、通信のスレッドを止めないように別で行う。
+                    let completing = Arc::clone(session);
+                    let completion = tokio::task::spawn_blocking(move || {
+                        completing.complete(&text, cursor as usize)
+                    })
+                    .await?;
+                    let message = ServerMessage::Completions {
+                        id,
+                        start: completion.start as u32,
+                        replacement: completion.replacement,
+                        candidates: completion.candidates,
+                    };
+                    write_frame(&mut writer, &message).await?;
+                    writer.flush().await?;
                 }
                 Some(ClientMessage::Input { data }) => session.write_input(data),
                 Some(ClientMessage::Resize { cols, rows }) => session.resize(cols, rows),

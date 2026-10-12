@@ -5,6 +5,7 @@
 //! bash が終わったらデーモンも終わる。
 
 mod block;
+mod complete;
 mod integration;
 mod marker;
 mod ring;

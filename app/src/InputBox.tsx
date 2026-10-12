@@ -9,10 +9,14 @@ import {
   onLastLine,
   type HistoryCursor,
 } from "./history";
+import { complete } from "./pty";
 import { useSession } from "./store";
 
 /** ディレクトリの表示の長さの上限 (文字数)。超えたら先頭を省く。 */
 const MAX_PATH_CHARS = 48;
+
+/** 補完の候補を一覧に出す数の上限。 */
+const MAX_SHOWN_CANDIDATES = 60;
 
 /** 入力欄が伸びる行数の上限。これを超えたら、中でスクロールする。 */
 const MAX_ROWS = 8;
@@ -39,6 +43,9 @@ export function InputBox() {
 
   const [text, setText] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
+  const [candidates, setCandidates] = useState<string[]>([]);
+  // 補完のあとで、カーソルを置く位置。テキストを描き直してから置く。
+  const caretAfter = useRef<number | null>(null);
   const textarea = useRef<HTMLTextAreaElement>(null);
   const cursor = useRef<HistoryCursor>(NOT_BROWSING);
   const composedAt = useRef(0);
@@ -102,10 +109,38 @@ export function InputBox() {
     element.style.height = `${Math.min(element.scrollHeight, line * MAX_ROWS + padding)}px`;
   }, [text]);
 
+  useLayoutEffect(() => {
+    if (caretAfter.current !== null) {
+      textarea.current!.setSelectionRange(caretAfter.current, caretAfter.current);
+      caretAfter.current = null;
+    }
+  }, [text]);
+
   const edit = (next: string) => {
     setText(next);
     setNotice(null);
+    setCandidates([]);
     cursor.current = NOT_BROWSING;
+  };
+
+  /** Tab で、カーソルの直前の単語をファイル名として補う。 */
+  const completeWord = async () => {
+    const element = textarea.current!;
+    const caret = element.selectionStart;
+    if (caret !== element.selectionEnd) {
+      return;
+    }
+    const before = text;
+    const completion = await complete(before, caret).catch(() => null);
+    // 待っている間に書き換えられていたら、何もしない。
+    if (!completion || element.value !== before || element.selectionStart !== caret) {
+      return;
+    }
+    if (completion.replacement !== before.slice(completion.start, caret)) {
+      caretAfter.current = completion.start + completion.replacement.length;
+      edit(before.slice(0, completion.start) + completion.replacement + before.slice(caret));
+    }
+    setCandidates(completion.candidates);
   };
 
   const submit = () => {
@@ -135,6 +170,7 @@ export function InputBox() {
     }
     setText(moved.text);
     setNotice(null);
+    setCandidates([]);
     cursor.current = moved.cursor;
     return true;
   };
@@ -154,6 +190,19 @@ export function InputBox() {
       return;
     }
     if (native.isComposing || native.keyCode === 229) {
+      return;
+    }
+    if (event.key === "Tab" && !event.ctrlKey && !event.altKey && !event.shiftKey) {
+      // フォーカスを移さず、ファイル名を補う。
+      event.preventDefault();
+      if (!running && !ended) {
+        void completeWord();
+      }
+      return;
+    }
+    if (event.key === "Escape" && candidates.length > 0) {
+      event.preventDefault();
+      setCandidates([]);
       return;
     }
     if ((event.key === "ArrowUp" || event.key === "ArrowDown") && !event.shiftKey) {
@@ -243,6 +292,20 @@ export function InputBox() {
           }}
           onKeyDown={onKeyDown}
         />
+        {candidates.length > 0 && (
+          <div className="composer-candidates" aria-label="補完の候補">
+            {candidates.slice(0, MAX_SHOWN_CANDIDATES).map((candidate) => (
+              <span key={candidate} data-directory={candidate.endsWith("/")}>
+                {candidate}
+              </span>
+            ))}
+            {candidates.length > MAX_SHOWN_CANDIDATES && (
+              <span className="composer-candidates-more">
+                ほか {candidates.length - MAX_SHOWN_CANDIDATES} 件
+              </span>
+            )}
+          </div>
+        )}
         <div className="composer-foot">
           {notice ? (
             <span className="composer-notice">{notice}</span>
@@ -251,6 +314,7 @@ export function InputBox() {
               <span>Enter 実行</span>
               <span>Shift+Enter 改行</span>
               <span>↑ 履歴</span>
+              <span>Tab 補完</span>
             </>
           )}
           <span className="composer-spacer" />

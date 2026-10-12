@@ -139,7 +139,7 @@ async fn show_blocks(
                 return Ok(());
             }
             ServerMessage::Error { message } => anyhow::bail!(message),
-            ServerMessage::BlockOutput { .. } => false,
+            ServerMessage::BlockOutput { .. } | ServerMessage::Completions { .. } => false,
         };
         if !ready {
             continue;
