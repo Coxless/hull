@@ -50,6 +50,9 @@
   --block-pad-left: 36px;
   --block-pad-right: 14px;
   --block-pad-bottom: 12px;
+  /* 実行中のブロックをウィンドウいっぱいに広げたときの、まわりの余白。 */
+  --max-pad-x: 8px;
+  --max-pad-y: 4px;
 
   color-scheme: dark;
 }
@@ -441,6 +444,40 @@ button:disabled {
   overflow: hidden;
 }
 
+/*
+ * 実行中のブロックを、ウィンドウいっぱいに広げる (vim や Claude Code のような全画面のアプリ)。
+ * 上のバー・入力欄・ほかのブロック・ブロックの枠と見出しを隠し、端末だけを残す。
+ * `.blocks-sizer` も同じ大きさにして、端末の列数と行数を合わせる。
+ */
+.app[data-maximized="true"] .topbar,
+.app[data-maximized="true"] .composer,
+.app[data-maximized="true"] .block-head,
+.app[data-maximized="true"] .blocks-inner > :not([data-running="true"]) {
+  display: none;
+}
+
+.app[data-maximized="true"] .blocks-wrap {
+  background: var(--panel);
+}
+
+.app[data-maximized="true"] .blocks {
+  padding: 0;
+  overflow: hidden;
+}
+
+.app[data-maximized="true"] .block {
+  border: 0;
+  border-radius: 0;
+}
+
+.app[data-maximized="true"] .block-terminal[data-shown="true"] {
+  padding: var(--max-pad-y) var(--max-pad-x);
+}
+
+.app[data-maximized="true"] .blocks-sizer {
+  inset: var(--max-pad-y) var(--max-pad-x);
+}
+
 /* 入力欄 */
 
 .composer {
@@ -602,6 +639,18 @@ button:disabled {
 
 .statusbar-spacer {
   flex: 1;
+}
+
+.statusbar-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+}
+
+.statusbar-button:hover {
+  text-decoration: underline;
 }
 
 .statusbar-state::before {

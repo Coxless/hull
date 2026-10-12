@@ -45,6 +45,12 @@ export interface SessionState {
   home: string | null;
   /** 失敗したブロックだけを見せる。 */
   failedOnly: boolean;
+  /**
+   * 実行中のブロックを、ウィンドウいっぱいに広げる。アプリが代替画面に入ると立ち、次の
+   * ブロックが始まると下りる。キーとボタンでも切り替えられる。実行中のブロックがない間は
+   * 意味を持たない ([`isMaximized`] で見る)。
+   */
+  maximized: boolean;
 }
 
 export interface Rejected {
@@ -71,9 +77,23 @@ const INITIAL: SessionState = {
   rejected: null,
   home: null,
   failedOnly: false,
+  maximized: false,
 };
 
 export const useSession = create<SessionState>(() => INITIAL);
+
+/** 実行中のブロックを、ウィンドウいっぱいに広げているか。 */
+export function isMaximized(state: SessionState): boolean {
+  return state.maximized && state.running !== null;
+}
+
+/** 実行中のブロックを、ウィンドウいっぱいに広げる・戻すキー。 */
+export const TOGGLE_MAXIMIZED_KEYS = "Ctrl+Shift+M";
+
+/** 実行中のブロックを広げる・戻す。実行中のブロックがなければ何もしない。 */
+export function toggleMaximized(): void {
+  useSession.setState((state) => (state.running ? { maximized: !state.maximized } : {}));
+}
 
 /** 画面を作り直すとき (生の表示から戻るときなど) に、最初の状態に戻す。 */
 export function resetSession(): void {
