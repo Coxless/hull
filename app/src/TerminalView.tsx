@@ -1,23 +1,14 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
-import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useEffect, useRef } from "react";
 import { KittyKeyboard } from "./kittyKeyboard";
 import { AckBatcher, InputQueue, appOptions, attach, resize, type ControlEvent } from "./pty";
-import { FONT_FAMILY, FONT_SIZE, THEME } from "./theme";
-
-export type Renderer = "webgl" | "dom";
-
-export interface TerminalStatus {
-  state: "connecting" | "running" | "exited" | "disconnected";
-  renderer: Renderer | null;
-  cols: number;
-  rows: number;
-  pid: number | null;
-}
+import { enableRenderer, flushWebglRenders } from "./renderer";
+import type { TerminalStatus } from "./StatusBar";
+import { attachTerminalKeys, encodeBinary, encodeData } from "./terminalKeys";
+import { BACKGROUND, FONT_FAMILY, FONT_SIZE, terminalTheme } from "./theme";
 
 interface Props {
   onStatus(status: TerminalStatus): void;
@@ -40,7 +31,7 @@ export function TerminalView({ onStatus }: Props) {
       fontFamily: FONT_FAMILY,
       fontSize: FONT_SIZE,
       scrollback: 10_000,
-      theme: THEME,
+      theme: terminalTheme(BACKGROUND),
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
@@ -67,7 +58,6 @@ export function TerminalView({ onStatus }: Props) {
     const kitty = new KittyKeyboard(term);
     const input = new InputQueue();
     const acks = new AckBatcher();
-    const encoder = new TextEncoder();
     let replaying = false;
     const notice = (text: string) => term.write(`\r\n\x1b[2m[${text}]\x1b[0m\r\n`);
 
@@ -75,7 +65,7 @@ export function TerminalView({ onStatus }: Props) {
       update({ state: "connecting", pid: null });
       replaying = true;
       try {
-        const info = await attach(term.cols, term.rows, {
+        const info = await attach(term.cols, term.rows, true, {
           onReplay: (data) => {
             // 再現する出力に入っている問い合わせ (カーソル位置や色など) に端末が応答すると、
             // その応答が bash への入力になってしまう。書き終えるまで入力を送らない。
@@ -102,6 +92,10 @@ export function TerminalView({ onStatus }: Props) {
     };
 
     const onControl = (event: ControlEvent) => {
+      // ブロックの知らせは、生の表示には届かない。
+      if (event.type !== "exited" && event.type !== "disconnected") {
+        return;
+      }
       input.clear();
       if (event.type === "exited") {
         notice(`bash が終了しました (終了コード ${event.code})。Enter で新しい bash を起動します`);
@@ -126,43 +120,23 @@ export function TerminalView({ onStatus }: Props) {
       }
     };
 
-    term.attachCustomKeyEventHandler((event) => {
-      if (event.type !== "keydown") {
-        return true;
-      }
-      if (event.ctrlKey && event.shiftKey && event.code === "KeyC") {
-        const selection = term.getSelection();
-        if (selection) {
-          void writeText(selection);
+    attachTerminalKeys(term, kitty, {
+      send,
+      intercept: (event) => {
+        if (status.state !== "exited" && status.state !== "disconnected") {
+          return false;
         }
-        event.preventDefault();
-        return false;
-      }
-      if (event.ctrlKey && event.shiftKey && event.code === "KeyV") {
-        void readText().then((text) => text && term.paste(text));
-        event.preventDefault();
-        return false;
-      }
-      if (status.state === "exited" || status.state === "disconnected") {
         if (event.key === "Enter" && !event.isComposing) {
           restart();
         }
-        return false;
-      }
-      const encoded = kitty.encode(event);
-      if (encoded !== null) {
-        send(encoder.encode(encoded));
-        event.preventDefault();
-        return false;
-      }
-      return true;
+        return true;
+      },
     });
 
     const subscriptions = [
       kitty,
-      term.onData((data) => send(encoder.encode(data))),
-      // マウス報告などの、UTF-8 として送ってはいけないバイト列。
-      term.onBinary((data) => send(Uint8Array.from(data, (char) => char.charCodeAt(0)))),
+      term.onData((data) => send(encodeData(data))),
+      term.onBinary((data) => send(encodeBinary(data))),
       term.onResize(({ cols, rows }) => {
         update({ cols, rows });
         if (status.state === "running") {
@@ -174,24 +148,7 @@ export function TerminalView({ onStatus }: Props) {
       }),
     ];
 
-    // WebGL の描画は、次に何かを描くまで画面に出ないことがある (WebKitGTK)。カーソルの点滅が
-    // 止まる非アクティブなウィンドウでは、最後の出力が出ないままになるので、描画が落ち着いたら
-    // もう一度だけ描き直して押し出す。
-    let flushTimer = 0;
-    let flushing = false;
-    subscriptions.push(
-      term.onRender(() => {
-        if (flushing || status.renderer !== "webgl") {
-          flushing = false;
-          return;
-        }
-        window.clearTimeout(flushTimer);
-        flushTimer = window.setTimeout(() => {
-          flushing = true;
-          term.refresh(0, term.rows - 1);
-        }, 40);
-      }),
-    );
+    subscriptions.push(flushWebglRenders(term, () => status.renderer === "webgl"));
 
     let frame = 0;
     const observer = new ResizeObserver(() => {
@@ -214,12 +171,14 @@ export function TerminalView({ onStatus }: Props) {
     term.focus();
 
     void (async () => {
-      const options = await appOptions().catch(() => ({ renderer: null }));
+      const renderer = await appOptions()
+        .then((options) => options.renderer)
+        .catch(() => null);
       if (disposed) {
         return;
       }
       update({
-        renderer: enableRenderer(term, options.renderer, (renderer) => update({ renderer })),
+        renderer: enableRenderer(term, renderer, (renderer) => update({ renderer })),
       });
       await connect();
     })();
@@ -228,7 +187,6 @@ export function TerminalView({ onStatus }: Props) {
       disposed = true;
       observer.disconnect();
       cancelAnimationFrame(frame);
-      window.clearTimeout(flushTimer);
       window.removeEventListener("focus", focus);
       element.removeEventListener("contextmenu", blockContextMenu);
       for (const subscription of subscriptions) {
@@ -239,40 +197,4 @@ export function TerminalView({ onStatus }: Props) {
   }, []);
 
   return <div className="terminal-host" ref={container} />;
-}
-
-/**
- * GPU (WebGL) で描く。使えない環境や、途中で GPU のコンテキストを失ったときは DOM 描画にする。
- *
- * GPU があるかどうかは画面側からは見分けられない (WebKit は描画デバイスの名前を隠す) ので、
- * Rust コアが調べて、GPU がなければ `preference` に `dom` を入れてくる。
- */
-function enableRenderer(
-  term: Terminal,
-  preference: string | null,
-  onChange: (renderer: Renderer) => void,
-): Renderer {
-  if (preference === "dom" || !supportsWebgl2()) {
-    return "dom";
-  }
-  try {
-    const webgl = new WebglAddon();
-    webgl.onContextLoss(() => {
-      // アドオンを外すと、xterm.js は元の DOM 描画に戻る。
-      webgl.dispose();
-      onChange("dom");
-    });
-    term.loadAddon(webgl);
-    return "webgl";
-  } catch {
-    return "dom";
-  }
-}
-
-function supportsWebgl2(): boolean {
-  try {
-    return document.createElement("canvas").getContext("webgl2") !== null;
-  } catch {
-    return false;
-  }
 }

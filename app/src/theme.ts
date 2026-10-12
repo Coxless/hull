@@ -3,29 +3,36 @@ import type { ITheme } from "@xterm/xterm";
 export const FONT_FAMILY =
   '"JetBrains Mono", "BIZ UDGothic", "Noto Sans Mono CJK JP", "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace';
 
-export const FONT_SIZE = 14;
+export const FONT_SIZE = 13;
 
-/** 暗い背景に暖色のアクセント (ember)。 */
-export const THEME: ITheme = {
-  background: "#1a1714",
-  foreground: "#e6dfd5",
-  cursor: "#ff8a3d",
-  cursorAccent: "#1a1714",
-  selectionBackground: "rgba(255, 138, 61, 0.32)",
-  black: "#2a2521",
-  red: "#e5645a",
-  green: "#9fbf6b",
-  yellow: "#e2b55a",
-  blue: "#6f9fd8",
-  magenta: "#c58bc9",
-  cyan: "#6fbfb4",
-  white: "#cfc6ba",
-  brightBlack: "#6f655b",
-  brightRed: "#f2857c",
-  brightGreen: "#b9d68a",
-  brightYellow: "#f0cc7e",
-  brightBlue: "#93b9e8",
-  brightMagenta: "#d9a8dc",
-  brightCyan: "#93d6cc",
-  brightWhite: "#f5efe6",
-};
+/** 画面の地の色 (生の表示の背景)。 */
+export const BACKGROUND = "#141316";
+/** ブロックのカードの色 (実行中のブロックの背景)。 */
+export const PANEL = "#1d1c21";
+
+/** 暗い背景に琥珀色のアクセント。背景だけ、置く場所に合わせて変える。 */
+export function terminalTheme(background: string): ITheme {
+  return {
+    background,
+    foreground: "#e7e2d9",
+    cursor: "#e6b562",
+    cursorAccent: background,
+    selectionBackground: "rgba(230, 181, 98, 0.30)",
+    black: "#2a2830",
+    red: "#f2946d",
+    green: "#7cc4a4",
+    yellow: "#e6b562",
+    blue: "#8ab8ec",
+    magenta: "#c79ad1",
+    cyan: "#7fc7c9",
+    white: "#c9c3b8",
+    brightBlack: "#8f8a82",
+    brightRed: "#f7b094",
+    brightGreen: "#9ad9bd",
+    brightYellow: "#f3cd86",
+    brightBlue: "#a9cdf3",
+    brightMagenta: "#dab7e2",
+    brightCyan: "#a3dcdd",
+    brightWhite: "#f3eee5",
+  };
+}
