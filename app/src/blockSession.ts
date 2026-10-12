@@ -22,7 +22,7 @@ import {
 } from "./pty";
 import { MAX_LINES, renderBuffer, type Rendered } from "./render";
 import { enableRenderer, flushWebglRenders } from "./renderer";
-import { outputs, useSession, type BlockEntry } from "./store";
+import { isMaximized, outputs, useSession, type BlockEntry } from "./store";
 import { attachTerminalKeys, encodeBinary, encodeData } from "./terminalKeys";
 import { FONT_FAMILY, FONT_SIZE, PANEL, terminalTheme } from "./theme";
 
@@ -115,6 +115,21 @@ export class BlockSession {
         this.updateClip();
       }),
       this.term.onWriteParsed(() => this.updateClip()),
+      // vim や Claude Code のような全画面のアプリには、ウィンドウいっぱいの大きさを渡す。
+      // 代替画面を抜けても戻さない (vim の `:!ls` のように出入りするたびに、大きさが変わって
+      // 画面が跳ねるのを避ける)。戻すのは、ブロックが終わったときと、キーやボタンで戻したとき。
+      this.term.buffer.onBufferChange((buffer) => {
+        if (buffer.type === "alternate") {
+          useSession.setState({ maximized: true });
+        }
+      }),
+      {
+        dispose: useSession.subscribe((state, previous) => {
+          if (isMaximized(state) !== isMaximized(previous)) {
+            this.updateClip();
+          }
+        }),
+      },
       this.term.onTitleChange((title) => {
         void getCurrentWindow().setTitle(title ? `${title} — ${APP_TITLE}` : APP_TITLE);
       }),
@@ -317,6 +332,7 @@ export class BlockSession {
   private reset(): void {
     this.term.reset();
     this.kitty.reset();
+    useSession.setState({ maximized: false });
     this.updateClip();
   }
 
@@ -431,7 +447,10 @@ export class BlockSession {
     return cell && cell.width > 0 && cell.height > 0 ? cell : null;
   }
 
-  /** ブロックが使える最大の大きさに合わせて、列数と行数を決める。 */
+  /**
+   * ブロックが使える最大の大きさに合わせて、列数と行数を決める。ウィンドウいっぱいに広げると
+   * `sizer` も広がるので、ここを通って端末と PTY の大きさが変わる。
+   */
   private fit(): void {
     const cell = this.cell();
     if (this.disposed || !cell) {
@@ -450,7 +469,8 @@ export class BlockSession {
   /**
    * 実行中のブロックの高さを、出力が届いた行までに切り詰める。`ls` のような短いコマンドで
    * 画面が大きく跳ねないようにするため。PTY の大きさは変えないので、コマンドから見た端末の
-   * 大きさは変わらない。画面いっぱいまで出力が届くか、代替画面に入ったら全体を見せる。
+   * 大きさは変わらない。画面いっぱいまで出力が届くか、ウィンドウいっぱいに広げている間は
+   * 全体を見せる。
    */
   private updateClip(): void {
     const cell = this.cell();
@@ -459,7 +479,7 @@ export class BlockSession {
     }
     const buffer = this.term.buffer.active;
     let used = this.term.rows;
-    if (buffer.type !== "alternate" && buffer.baseY === 0) {
+    if (!isMaximized(useSession.getState()) && buffer.type !== "alternate" && buffer.baseY === 0) {
       // カーソルより下に描くアプリもあるので、文字のある最後の行も見る。
       used = buffer.cursorY + 1;
       for (let y = this.term.rows - 1; y >= used; y--) {

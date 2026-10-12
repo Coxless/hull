@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { BlockView } from "./BlockView";
 import { appOptions } from "./pty";
 import { INITIAL_STATUS, StatusBar, type TerminalStatus } from "./StatusBar";
-import { useSession } from "./store";
+import { isMaximized, useSession } from "./store";
 import { TerminalView } from "./TerminalView";
 import { TopBar } from "./TopBar";
 
@@ -14,6 +14,7 @@ export function App() {
   const [mode, setMode] = useState<Mode | null>(null);
   const [rawStatus, setRawStatus] = useState(INITIAL_STATUS);
   const blockStatus = useBlockStatus();
+  const maximized = useSession(isMaximized) && mode === "blocks";
 
   useEffect(() => {
     appOptions()
@@ -40,12 +41,16 @@ export function App() {
   }, [toggleRaw]);
 
   return (
-    <div className="app">
+    <div className="app" data-maximized={maximized}>
       {mode !== null && <TopBar raw={mode === "raw"} onToggleRaw={toggleRaw} />}
       {mode === "blocks" && <BlockView onUnintegrated={() => setMode("raw")} />}
       {mode === "raw" && <TerminalView onStatus={setRawStatus} />}
       {mode === null && <div className="terminal-host" />}
-      <StatusBar status={mode === "raw" ? rawStatus : blockStatus} raw={mode === "raw"} />
+      <StatusBar
+        status={mode === "raw" ? rawStatus : blockStatus}
+        raw={mode === "raw"}
+        maximized={maximized}
+      />
     </div>
   );
 }

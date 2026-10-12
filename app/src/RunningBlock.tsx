@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { BlockHeader } from "./Block";
 import { useBlockSession } from "./BlockView";
 import { formatDuration } from "./format";
-import type { RunningEntry } from "./store";
+import { TOGGLE_MAXIMIZED_KEYS, toggleMaximized, type RunningEntry } from "./store";
 
 /**
  * 始まってからこの時間は、端末を見せない。その間に終われば、最初から静的な表示になる
@@ -57,6 +57,19 @@ export function RunningBlock({ block }: Props) {
           <Elapsed since={block.info.startedAt} />
           <span className="block-pill" data-kind="running">
             実行中
+          </span>
+          <span className="block-actions">
+            <button
+              type="button"
+              className="block-action"
+              aria-label="ウィンドウいっぱいに広げる"
+              title={`ウィンドウいっぱいに広げる (${TOGGLE_MAXIMIZED_KEYS})`}
+              onClick={toggleMaximized}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
+              </svg>
+            </button>
           </span>
         </BlockHeader>
       )}

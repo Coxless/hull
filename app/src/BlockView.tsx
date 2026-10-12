@@ -3,7 +3,7 @@ import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { BlockList } from "./BlockList";
 import { BlockSession } from "./blockSession";
 import { InputBox } from "./InputBox";
-import { resetSession } from "./store";
+import { resetSession, toggleMaximized, useSession } from "./store";
 
 const SessionContext = createContext<BlockSession | null>(null);
 
@@ -48,6 +48,20 @@ export function BlockView({ onUnintegrated }: Props) {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  // TOGGLE_MAXIMIZED_KEYS で、実行中のブロックをウィンドウいっぱいに広げる・戻す。端末に渡る前に受け取る。
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const pressed = event.ctrlKey && event.shiftKey && !event.altKey && event.code === "KeyM";
+      if (pressed && useSession.getState().running !== null) {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleMaximized();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
   }, []);
 
   return (
