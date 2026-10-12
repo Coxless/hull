@@ -135,6 +135,23 @@ export async function blockOutput(id: number): Promise<{ data: Uint8Array; trunc
   return { data: body.subarray(1), truncated: body[0] === 1 };
 }
 
+export interface Completion {
+  /** 置き換える範囲の始まり。終わりはカーソルの位置。 */
+  start: number;
+  /** 置き換えるテキスト。候補がなければ空。 */
+  replacement: string;
+  /** 候補が複数あるときの一覧 (ディレクトリは末尾に `/`)。 */
+  candidates: string[];
+}
+
+/**
+ * 入力欄の Tab 補完。`text` の `cursor` の直前の単語を、bash の今のディレクトリの
+ * ファイル名として補う。
+ */
+export function complete(text: string, cursor: number): Promise<Completion> {
+  return invoke("complete", { text, cursor });
+}
+
 /** キー入力のバイト列を、そのまま bash に送る。 */
 export function sendInput(data: Uint8Array): void {
   invoke("pty_input", data).catch(() => {

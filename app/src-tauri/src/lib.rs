@@ -20,6 +20,7 @@ pub fn run() {
             pty::pty_ack,
             pty::session_run,
             pty::block_output,
+            pty::complete,
         ])
         .build(tauri::generate_context!())
         .expect("hull-terminal を起動できません")

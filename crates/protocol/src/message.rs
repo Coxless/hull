@@ -32,6 +32,16 @@ pub enum ClientMessage {
     Run { text: String },
     /// 終了したブロックの出力を取る。`BlockOutput` が返る。
     FetchOutput { id: u64 },
+    /// 入力欄の Tab 補完。カーソルの直前の単語を、今のディレクトリのファイル名として補う。
+    /// `Completions` が返る。
+    Complete {
+        /// 応答と突き合わせるための番号。
+        id: u64,
+        /// 入力欄のテキスト。
+        text: String,
+        /// カーソルの位置 (`text` の UTF-8 でのバイト位置)。
+        cursor: u32,
+    },
 }
 
 /// ブロック1つ。コマンドと出力の1往復。
@@ -150,5 +160,15 @@ pub enum ServerMessage {
     RunRejected {
         reason: RunRejection,
         text: String,
+    },
+    /// `Complete` への応答。テキストの `start` からカーソルまでを `replacement` に置き換える。
+    Completions {
+        id: u64,
+        /// 置き換える範囲の始まり (UTF-8 でのバイト位置)。
+        start: u32,
+        /// 置き換えるテキスト。候補がなければ空。
+        replacement: String,
+        /// 候補が複数あるときの一覧 (ディレクトリは末尾に `/`)。1つに決まったときは空。
+        candidates: Vec<String>,
     },
 }

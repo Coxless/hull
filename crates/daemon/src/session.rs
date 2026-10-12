@@ -1,4 +1,5 @@
 use std::io::{Read, Write};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -8,6 +9,7 @@ use portable_pty::{native_pty_system, MasterPty, PtySize};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::block::{Blocks, Context, StoredOutput};
+use crate::complete::{complete, Completion};
 use crate::integration::Integration;
 use crate::marker::{Event, Item, Splitter};
 use crate::{Ring, ShellSpec};
@@ -216,6 +218,8 @@ pub(crate) struct Session {
     input: std::sync::mpsc::Sender<Vec<u8>>,
     master: Mutex<Option<Box<dyn MasterPty + Send>>>,
     pid: Option<u32>,
+    /// bash のホームディレクトリ。
+    home: Option<PathBuf>,
 }
 
 /// セッションの終わりを知らせる受け口。
@@ -316,7 +320,8 @@ impl Session {
             let _ = exited_tx.send(code);
         })?;
 
-        let session = Self { shared, input, master: Mutex::new(Some(pair.master)), pid };
+        let home = shell.home_dir();
+        let session = Self { shared, input, master: Mutex::new(Some(pair.master)), pid, home };
         Ok((session, SessionEnd { exited, drained }))
     }
 
@@ -370,6 +375,17 @@ impl Session {
         let _ = self.input.send(format!("{PASTE_START}{text}{PASTE_END}\r").into_bytes());
         shared.pending = Some(text);
         Ok(())
+    }
+
+    /// 入力欄の Tab 補完。`text` の `cursor` (バイト位置) の直前の単語を、bash の今の
+    /// ディレクトリのファイル名として補う。ディレクトリを読むので、呼び出しは待たされることがある。
+    pub fn complete(&self, text: &str, cursor: usize) -> Completion {
+        let cwd = lock(&self.shared).prompt.cwd.clone().map(PathBuf::from);
+        // プロンプトがまだ出ていなければ、bash はホームディレクトリにいる。
+        match cwd.or_else(|| self.home.clone()) {
+            Some(cwd) => complete(text, cursor, &cwd, self.home.as_deref()),
+            None => Completion { start: cursor, ..Completion::default() },
+        }
     }
 
     /// 終了したブロックの出力。そのブロックがなければ `None`。
