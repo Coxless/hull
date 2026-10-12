@@ -43,6 +43,8 @@ export interface SessionState {
   rejected: Rejected | null;
   /** ホームディレクトリ。ディレクトリの表示を `~` で短くするために使う。 */
   home: string | null;
+  /** 失敗したブロックだけを見せる。 */
+  failedOnly: boolean;
 }
 
 export interface Rejected {
@@ -68,6 +70,7 @@ const INITIAL: SessionState = {
   pending: null,
   rejected: null,
   home: null,
+  failedOnly: false,
 };
 
 export const useSession = create<SessionState>(() => INITIAL);

@@ -1,7 +1,7 @@
 import { Terminal } from "@xterm/headless";
 import type { IBuffer } from "@xterm/xterm";
 import { describe, expect, it } from "vitest";
-import { renderBuffer } from "./render";
+import { plainText, renderBuffer } from "./render";
 
 /** 出力を端末に通して、HTML にする。 */
 async function render(output: string, options: { cols?: number; maxLines?: number } = {}) {
@@ -88,6 +88,11 @@ describe("renderBuffer", () => {
     const { lines, omitted } = await render(output, { maxLines: 3 });
     expect(lines).toEqual(["line 48", "line 49", "line 50"]);
     expect(omitted).toBe(true);
+  });
+
+  it("HTML にした行を、もとの文字に戻せる", async () => {
+    const { lines } = await render('\x1b[31m<a href="x">\x1b[0m & &amp; 日本語\r\n\r\nlast');
+    expect(plainText(lines)).toBe('<a href="x"> & &amp; 日本語\n\nlast');
   });
 
   it("見えない文字は、空白にする", async () => {

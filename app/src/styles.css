@@ -81,6 +81,76 @@ button:disabled {
   height: 100%;
 }
 
+/* 上のバー */
+
+.topbar {
+  display: flex;
+  flex-shrink: 0;
+  gap: 10px;
+  align-items: center;
+  height: 44px;
+  padding: 0 var(--list-pad-x);
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 12px;
+  user-select: none;
+}
+
+.topbar-title {
+  color: var(--text-soft);
+  font-family: var(--mono-font);
+  font-size: 12.5px;
+}
+
+.topbar-spacer {
+  flex: 1;
+}
+
+.topbar-filter {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: #1c1b20;
+}
+
+.topbar-filter button {
+  height: 24px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #a39d93;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.topbar-filter button[aria-pressed="true"] {
+  background: #2e2c34;
+  color: #f3eee5;
+}
+
+.topbar-button {
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid #2e2c33;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-soft);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.topbar-button:hover {
+  background: #1c1b20;
+}
+
+.topbar-button[aria-pressed="true"] {
+  border-color: #5b4a2c;
+  background: rgba(230, 181, 98, 0.1);
+  color: var(--accent);
+}
+
 /* 生の表示 */
 
 .terminal-host {
@@ -230,6 +300,49 @@ button:disabled {
 .block-pill[data-kind="running"] {
   background: rgba(230, 181, 98, 0.16);
   color: var(--accent);
+}
+
+.block-actions {
+  display: flex;
+  gap: 2px;
+  margin-right: -6px;
+}
+
+.block-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #a39d93;
+}
+
+.block-action:hover:not(:disabled) {
+  background: #2a2830;
+  color: var(--text);
+}
+
+.block-action:disabled {
+  opacity: 0.4;
+}
+
+.block-action[data-state="done"] {
+  color: var(--ok);
+}
+
+.block-action[data-state="failed"] {
+  color: var(--err);
+}
+
+.block-action svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
 }
 
 .block-output {
