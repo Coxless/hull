@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDuration, shortenPath } from "./format";
+import { formatDuration, shortenPath, truncatePath } from "./format";
 
 describe("formatDuration", () => {
   it("1分より短ければ、秒を小数1桁で出す", () => {
@@ -21,6 +21,23 @@ describe("formatDuration", () => {
 
   it("負の値は 0 にする", () => {
     expect(formatDuration(-5)).toBe("0.0s");
+  });
+});
+
+describe("truncatePath", () => {
+  it("短ければ変えない", () => {
+    expect(truncatePath("~/work/app", 20)).toBe("~/work/app");
+  });
+
+  it("長ければ先頭を省いて、収まるだけの末尾を残す", () => {
+    expect(truncatePath("~/work/projects/shop-api/src/payment", 24)).toBe("…/shop-api/src/payment");
+    expect(truncatePath("/a/b/c/d", 5)).toBe("…/c/d");
+  });
+
+  it("最後の名前が長くても、その名前は省かない", () => {
+    expect(truncatePath("/tmp/a-very-long-directory-name", 10)).toBe(
+      "…/a-very-long-directory-name",
+    );
   });
 });
 

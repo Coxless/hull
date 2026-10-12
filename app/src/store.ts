@@ -39,6 +39,18 @@ export interface SessionState {
   ready: boolean;
   /** 送って、まだ実行が始まっていないテキスト。 */
   pending: string | null;
+  /** 実行されなかったテキスト。入力欄に戻す。 */
+  rejected: Rejected | null;
+  /** ホームディレクトリ。ディレクトリの表示を `~` で短くするために使う。 */
+  home: string | null;
+}
+
+export interface Rejected {
+  text: string;
+  /** 入力が途中だった / コマンドの実行中などで受け付けられなかった。 */
+  reason: "incomplete" | "busy";
+  /** 同じテキストが続けて断られても見分けられるように、断られるたびに増やす。 */
+  serial: number;
 }
 
 const INITIAL: SessionState = {
@@ -54,6 +66,8 @@ const INITIAL: SessionState = {
   prompt: { cwd: null, branch: null },
   ready: false,
   pending: null,
+  rejected: null,
+  home: null,
 };
 
 export const useSession = create<SessionState>(() => INITIAL);

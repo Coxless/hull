@@ -23,6 +23,26 @@ function pad(value: number): string {
   return value < 10 ? `0${value}` : String(value);
 }
 
+/**
+ * 長いディレクトリを、先頭を省いて `…/` で始まる形にする。末尾 (今いる場所) を残す。
+ * 最後の名前だけで `max` 文字を超えるときは、その名前をそのまま出す。
+ */
+export function truncatePath(path: string, max: number): string {
+  if (path.length <= max) {
+    return path;
+  }
+  const parts = path.split("/");
+  let kept = parts[parts.length - 1];
+  for (let i = parts.length - 2; i >= 0; i--) {
+    const longer = `${parts[i]}/${kept}`;
+    if (longer.length + 2 > max) {
+      break;
+    }
+    kept = longer;
+  }
+  return `…/${kept}`;
+}
+
 /** ホームディレクトリを `~` にして短くする。 */
 export function shortenPath(path: string, home: string | null): string {
   if (home && (path === home || path.startsWith(`${home}/`))) {
