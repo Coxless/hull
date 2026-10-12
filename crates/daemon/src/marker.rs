@@ -221,6 +221,11 @@ impl Splitter {
         }
     }
 
+    /// コマンドが終わって (または取り消されて)、次のプロンプトを準備しているか。
+    pub fn is_between(&self) -> bool {
+        self.state == State::Between
+    }
+
     /// プロンプトを表示して、入力を待っているか。
     pub fn is_at_prompt(&self) -> bool {
         self.state == State::Prompt
@@ -627,6 +632,9 @@ mod tests {
         assert!(splitter.is_at_prompt());
 
         splitter.feed(mark("C").as_bytes(), &mut items);
-        assert!(!splitter.is_at_prompt());
+        assert!(!splitter.is_at_prompt() && !splitter.is_between());
+
+        splitter.feed(mark("D;0").as_bytes(), &mut items);
+        assert!(splitter.is_between());
     }
 }

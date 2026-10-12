@@ -105,6 +105,8 @@ async fn fetch(client: &mut Client, id: u64) -> (String, bool) {
 }
 
 /// 実行中のブロックの出力に `needle` が現れるまで読む。
+///
+/// 出力は途中で分かれて届くことがある。続きが残らないよう、行の終わりまでを `needle` にする。
 async fn read_output_until(client: &mut Client, needle: &str) -> String {
     let mut output = Vec::new();
     loop {
@@ -259,7 +261,7 @@ async fn run_is_rejected_while_a_command_is_running() {
 
     client.send(ClientMessage::Run { text: "echo waiting-$((1+1)); read line".into() }).await;
     started(&mut client).await;
-    read_output_until(&mut client, "waiting-2").await;
+    read_output_until(&mut client, "waiting-2\r\n").await;
 
     client.send(ClientMessage::Run { text: "echo no".into() }).await;
     assert_eq!(
@@ -299,7 +301,7 @@ async fn ctrl_c_ends_the_block_with_130() {
     let text = "bash -c 'echo go-$((1+1)); exec sleep 60'";
     client.send(ClientMessage::Run { text: text.into() }).await;
     started(&mut client).await;
-    read_output_until(&mut client, "go-2").await;
+    read_output_until(&mut client, "go-2\r\n").await;
     client.send_bytes(b"\x03").await;
     let (result, _) = blocks_until_prompt_from_running(&mut client).await;
     assert_eq!(result.exit_code, Some(130));
@@ -372,7 +374,7 @@ async fn reopening_while_a_command_runs_replays_its_output() {
     let mut first = attach_ready(&daemon).await;
     first.send(ClientMessage::Run { text: "echo waiting-$((1+1)); read line".into() }).await;
     let block = started(&mut first).await;
-    read_output_until(&mut first, "waiting-2").await;
+    read_output_until(&mut first, "waiting-2\r\n").await;
     drop(first);
 
     let (mut second, history) = attach(&daemon).await;

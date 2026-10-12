@@ -1,6 +1,6 @@
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context as _;
 use hull_terminal_protocol::{BlockResult, PromptState, RunRejection, ServerMessage};
@@ -25,6 +25,12 @@ const PASTE_START: &str = "\x1b[200~";
 const PASTE_END: &str = "\x1b[201~";
 /// Ctrl+C。
 const INTERRUPT: u8 = 0x03;
+/// 続きの入力を待つプロンプトが出てから、取り消しの Ctrl+C を送るまでの間。
+/// bash がプロンプトを描いている最中に届くと、割り込みを処理しないまま入力待ちに入ることがある。
+const CANCEL_DELAY: Duration = Duration::from_millis(20);
+/// 取り消しが効かなかったときに、Ctrl+C を送り直す間隔と回数。
+const CANCEL_RETRY: Duration = Duration::from_millis(250);
+const CANCEL_TRIES: usize = 20;
 
 /// セッションからクライアントへ流すもの。
 #[derive(Debug, Clone)]
@@ -60,6 +66,9 @@ struct Shared {
     pending: Option<String>,
     /// 実行中のブロックが `Run` で始まった。
     started_by_run: bool,
+    /// 途中の入力を取り消している最中なら、その取り消しの番号。
+    cancelling: Option<u64>,
+    cancels: u64,
     cols: u16,
     rows: u16,
     clients: Vec<Client>,
@@ -79,15 +88,14 @@ impl Shared {
     }
 
     /// PTY から読んだ出力を区切ってブロックに記録し、ブロックの表示へ流すものを `events` に足す。
-    fn digest(
-        &mut self,
-        chunk: &[u8],
-        input: &std::sync::mpsc::Sender<Vec<u8>>,
-        events: &mut Vec<ClientEvent>,
-    ) {
+    fn digest(&mut self, chunk: &[u8], canceller: &Canceller, events: &mut Vec<ClientEvent>) {
         let mut items = Vec::new();
         if let Some(splitter) = &mut self.splitter {
             splitter.feed(chunk, &mut items);
+            // 取り消しが効いて、bash が次のプロンプトの準備に入った。
+            if splitter.is_between() {
+                self.cancelling = None;
+            }
         }
         for item in items {
             match item {
@@ -112,23 +120,33 @@ impl Shared {
                     self.flush_outside(events);
                     // 何も実行されずにプロンプトへ戻った (空行やコメントだけの行)。
                     self.pending = None;
+                    self.cancelling = None;
                     let prompt = self.prompt.clone();
                     events.push(ClientEvent::Message(ServerMessage::Prompt { prompt }));
                 }
                 // 入力欄から送ったテキストが途中だった。続きを bash に入力させずに取り消す。
                 Item::Event(Event::Continuation) => {
                     if let Some(text) = self.pending.take() {
-                        let _ = input.send(vec![INTERRUPT]);
+                        self.cancel(canceller);
                         let reason = RunRejection::Incomplete;
                         events.push(ClientEvent::Message(ServerMessage::RunRejected {
                             reason,
                             text,
                         }));
                     } else if self.started_by_run {
-                        let _ = input.send(vec![INTERRUPT]);
+                        self.cancel(canceller);
                     }
                 }
             }
+        }
+    }
+
+    /// bash が待っている続きの入力を、Ctrl+C で取り消す。
+    fn cancel(&mut self, canceller: &Canceller) {
+        if self.cancelling.is_none() {
+            self.cancels += 1;
+            self.cancelling = Some(self.cancels);
+            canceller.start(self.cancels);
         }
     }
 
@@ -153,6 +171,38 @@ impl Shared {
         events.push(ClientEvent::Output(output.into()));
         events
             .push(ClientEvent::Message(ServerMessage::BlockFinished { id, result: block.result }));
+    }
+}
+
+/// 途中の入力を取り消す Ctrl+C を、効くまで送る。
+struct Canceller {
+    shared: Arc<Mutex<Shared>>,
+    input: std::sync::mpsc::Sender<Vec<u8>>,
+}
+
+impl Canceller {
+    fn start(&self, id: u64) {
+        let shared = Arc::clone(&self.shared);
+        let input = self.input.clone();
+        let spawned = std::thread::Builder::new().name("pty-cancel".into()).spawn(move || {
+            std::thread::sleep(CANCEL_DELAY);
+            for _ in 0..CANCEL_TRIES {
+                {
+                    let shared = lock(&shared);
+                    if shared.cancelling != Some(id) || shared.exited.is_some() {
+                        return;
+                    }
+                }
+                if input.send(vec![INTERRUPT]).is_err() {
+                    return;
+                }
+                std::thread::sleep(CANCEL_RETRY);
+            }
+        });
+        // スレッドを作れないときは、待たずに1回だけ送る。
+        if spawned.is_err() {
+            let _ = self.input.send(vec![INTERRUPT]);
+        }
     }
 }
 
@@ -208,6 +258,8 @@ impl Session {
             prompt: PromptState::default(),
             pending: None,
             started_by_run: false,
+            cancelling: None,
+            cancels: 0,
             cols: 80,
             rows: 24,
             clients: Vec::new(),
@@ -215,7 +267,7 @@ impl Session {
         }));
 
         let (input, input_rx) = std::sync::mpsc::channel::<Vec<u8>>();
-        let reader_input = input.clone();
+        let canceller = Canceller { shared: Arc::clone(&shared), input: input.clone() };
 
         // PTY の読み書きはブロッキングなので、専用のスレッドで行う。
         let (drained_tx, drained) = oneshot::channel();
@@ -234,7 +286,7 @@ impl Session {
                 let clients = {
                     let mut shared = lock(&reader_shared);
                     shared.ring.push(&chunk);
-                    shared.digest(&chunk, &reader_input, &mut events);
+                    shared.digest(&chunk, &canceller, &mut events);
                     shared.recipients()
                 };
                 for (client, raw) in clients {
