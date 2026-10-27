@@ -5,64 +5,37 @@
 # - base / sdks を変更したら `workshop refresh` で反映する
 # - actions の変更は refresh 不要 (即時反映)
 #
-# hull-terminal のビルド要件: Rust (デーモン / Tauri コア) / Node 22 LTS (フロント) / Tauri v2 のシステムライブラリ
+# hull-terminal のビルド要件: Rust。Wayland などのシステムライブラリは Phase 1 で足す
 
 name: dev
 base: ubuntu@24.04   # ubuntu@22.04 / 24.04 / 26.04
 
 sdks:
-  - name: rust          # デーモン (crates/) と Tauri の Rust コア (app/src-tauri)
-  - name: node          # フロントエンド (React + TypeScript + Vite) と Tauri CLI
-    channel: 22/stable
-
-# ホストへのポート公開の例 (ワークショップ内の Vite 開発サーバーをホストの 127.0.0.1:5173 で見る)
-#  - name: system
-#    plugs:
-#      web:
-#        interface: tunnel
-#        endpoint: 127.0.0.1:5173
+  - name: rust
 
 # `workshop run -- <action> [引数...]` で実行する名前付きスクリプト。
 # bash (errexit + pipefail) で実行される。プロジェクトは /project にマウントされる。
-# ソースがまだない段階でも失敗しないよう、Cargo.toml / app/package.json があるときだけ実行する。
+# ソースがまだない段階でも失敗しないよう、Cargo.toml があるときだけ実行する。
 actions:
   setup: |
-    # Tauri v2 の前提パッケージ (WebKitGTK 4.1 など) と C ツールチェーン
     sudo apt-get update
     sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-      git build-essential pkg-config curl wget file \
-      libwebkit2gtk-4.1-dev libxdo-dev libssl-dev \
-      libayatana-appindicator3-dev librsvg2-dev
+      git build-essential pkg-config
     cd /project
     if [ -f Cargo.toml ]; then cargo fetch; fi
-    if [ -f app/package.json ]; then npm --prefix app install; fi
 
   build: |
     cd /project
-    # Tauri のビルドがフロントの成果物 (app/dist) を取り込むので、先にフロントを作る
-    if [ -f app/package.json ]; then npm --prefix app run build; fi
-    cargo build --workspace "$@"
-
-  package: |
-    # デーモンを同梱した配布パッケージを target/release/bundle/ に出力する。
-    # 例: `workshop run -- package --bundles deb`
-    cd /project/app
-    npm run bundle -- "$@"
+    if [ -f Cargo.toml ]; then cargo build --workspace "$@"; fi
 
   test: |
-    # デーモンを起動して bash を操作する結合テストを含む
     cd /project
-    if [ -f app/package.json ] && [ ! -d app/dist ]; then npm --prefix app run build; fi
-    cargo test --workspace "$@"
-    if [ -f app/package.json ]; then npm --prefix app test; fi
+    if [ -f Cargo.toml ]; then cargo test --workspace "$@"; fi
 
   lint: |
     cd /project
-    if [ -f app/package.json ] && [ ! -d app/dist ]; then npm --prefix app run build; fi
-    cargo clippy --workspace --all-targets -- -D warnings
-    if [ -f app/package.json ]; then npm --prefix app run typecheck; fi
+    if [ -f Cargo.toml ]; then cargo clippy --workspace --all-targets -- -D warnings; fi
 
   fmt: |
     cd /project
-    cargo fmt --all
-    if [ -f app/package.json ]; then npm --prefix app run format; fi
+    if [ -f Cargo.toml ]; then cargo fmt --all; fi
