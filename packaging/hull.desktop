@@ -1,0 +1,20 @@
+[Desktop Entry]
+Type=Application
+Name=hull
+GenericName=Terminal
+GenericName[ja]=端末
+Comment=A fast terminal for Ubuntu, extended with plugins
+Comment[ja]=Ubuntu 専用に削った速いターミナル。足りない機能はプラグインで足す
+Exec=hull
+Icon=hull
+Terminal=false
+Categories=System;TerminalEmulator;
+Keywords=shell;prompt;command;commandline;terminal;tmux;
+StartupWMClass=hull
+StartupNotify=true
+Actions=new-window;
+
+[Desktop Action new-window]
+Name=New Window
+Name[ja]=新しい窓
+Exec=hull

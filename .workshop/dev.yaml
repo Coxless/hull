@@ -5,7 +5,7 @@
 # - base / sdks を変更したら `workshop refresh` で反映する
 # - actions の変更は refresh 不要 (即時反映)
 #
-# hull-terminal のビルド要件: Rust。Wayland などのシステムライブラリは Phase 1 で足す
+# hull-terminal のビルド要件: Rust と、Wayland・xkbcommon・fontconfig・EGL の開発用ライブラリ
 
 name: dev
 base: ubuntu@24.04   # ubuntu@22.04 / 24.04 / 26.04
@@ -15,27 +15,31 @@ sdks:
 
 # `workshop run -- <action> [引数...]` で実行する名前付きスクリプト。
 # bash (errexit + pipefail) で実行される。プロジェクトは /project にマウントされる。
-# ソースがまだない段階でも失敗しないよう、Cargo.toml があるときだけ実行する。
 actions:
   setup: |
     sudo apt-get update
     sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-      git build-essential pkg-config
+      git build-essential pkg-config \
+      libwayland-dev libxkbcommon-dev libfontconfig-dev libegl-dev
     cd /project
-    if [ -f Cargo.toml ]; then cargo fetch; fi
+    cargo fetch
 
   build: |
     cd /project
-    if [ -f Cargo.toml ]; then cargo build --workspace "$@"; fi
+    cargo build --workspace "$@"
 
   test: |
     cd /project
-    if [ -f Cargo.toml ]; then cargo test --workspace "$@"; fi
+    cargo test --workspace "$@"
 
   lint: |
     cd /project
-    if [ -f Cargo.toml ]; then cargo clippy --workspace --all-targets -- -D warnings; fi
+    cargo clippy --workspace --all-targets -- -D warnings
 
   fmt: |
     cd /project
-    if [ -f Cargo.toml ]; then cargo fmt --all; fi
+    cargo fmt --all
+
+  deb: |
+    cd /project
+    scripts/build-deb.sh "$@"

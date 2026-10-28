@@ -1,15 +1,66 @@
-# Ubuntu 向けの配布パッケージ (.deb) を作る。CI から呼ばれる。
+# Ubuntu 向けの配布パッケージ (.deb) を作り、入れて起動できることを確かめる。
+# CI (プルリクエストと main への push) とリリース (タグの push) の両方から呼ばれる。
 # ジョブ名 "Ubuntu (.deb)" は main のブランチ保護で必須の検査になっているので、変えない。
-# 作り直しの途中で、まだパッケージにするものがない。Phase 1 で .deb を作る手順に戻す。
 name: Package
 
 on:
   workflow_call:
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
   deb:
     name: Ubuntu (.deb)
     runs-on: ubuntu-24.04
     steps:
-      - name: まだパッケージにするものがない
-        run: echo "作り直しの途中なので、.deb は作りません"
+      - uses: actions/checkout@v4
+
+      - name: ビルドに要るライブラリ
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libwayland-dev libxkbcommon-dev libfontconfig-dev libegl-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: package
+
+      - name: .deb を作る
+        run: scripts/build-deb.sh dist
+
+      - name: 中身を表示する
+        run: |
+          sha256sum dist/*.deb
+          dpkg-deb --info dist/*.deb
+          dpkg-deb --contents dist/*.deb
+
+      # 作った .deb を実際に入れ、ヘッドレスの weston の上で起動して、画面を描けることを確かめる。
+      - name: 入れて起動できるか確かめる
+        run: |
+          sudo apt-get install -y weston fonts-dejavu-core ./dist/*.deb
+          test -x /usr/bin/hull
+          hull --version
+          for p in search url-hints claude-status; do test -x /usr/lib/hull/plugins/hull-$p; done
+
+          export XDG_RUNTIME_DIR="$RUNNER_TEMP/xdg"
+          mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
+          weston --backend=headless --renderer=gl --socket=wayland-ci --idle-time=0 > "$RUNNER_TEMP/weston.log" 2>&1 &
+          for _ in $(seq 1 50); do [ -S "$XDG_RUNTIME_DIR/wayland-ci" ] && break; sleep 0.2; done
+
+          # 窓を開き、シェルの出力を描いた画面を PNG に書き出して終わる。
+          WAYLAND_DISPLAY=wayland-ci HULL_SCREENSHOT="$RUNNER_TEMP/hull.png" \
+            timeout 60 hull -e sh -c 'echo hull-ci-ok; sleep 20' || true
+          if [ ! -s "$RUNNER_TEMP/hull.png" ]; then
+            echo "::error::hull を起動して、画面を描けませんでした"
+            cat "$RUNNER_TEMP/weston.log" || true
+            exit 1
+          fi
+          ls -la "$RUNNER_TEMP/hull.png"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hull-terminal-deb
+          path: dist/*.deb
+          if-no-files-found: error
