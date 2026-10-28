@@ -9,9 +9,7 @@
 //! - Esc: 閉じる (一番下に戻る)
 //! - 小文字だけで打つと、大文字と小文字を区別しない
 
-use hull_plugin::{
-    Action, Client, HostEvent, OverlayItem, Range, TextResult, TextSource, col_of, width,
-};
+use hull_plugin::{Action, Client, HostEvent, OverlayItem, Range, TextResult, TextSource, width};
 
 /// 送るハイライトの上限 (多すぎると重くなる)。
 const MAX_MATCHES: usize = 10_000;
@@ -23,12 +21,25 @@ struct Search {
     open: bool,
     query: String,
     text: TextResult,
+    /// `text` の行を小文字にしたもの (打つたびに作り直さないよう、開いたときに作る)。
+    lower: Vec<String>,
     matches: Vec<Range>,
     current: Option<usize>,
     cols: usize,
 }
 
-fn find_matches(text: &TextResult, query: &str) -> Vec<Range> {
+/// 行を小文字にする。小文字にすると長さが変わる文字を含む行は、元のまま (バイトの位置がずれるため)。
+fn lowercase_lines(text: &TextResult) -> Vec<String> {
+    text.lines
+        .iter()
+        .map(|line| {
+            let lower = line.to_lowercase();
+            if lower.len() == line.len() { lower } else { line.clone() }
+        })
+        .collect()
+}
+
+fn find_matches(text: &TextResult, lower: &[String], query: &str) -> Vec<Range> {
     if query.is_empty() {
         return Vec::new();
     }
@@ -37,18 +48,12 @@ fn find_matches(text: &TextResult, query: &str) -> Vec<Range> {
     let needle = if fold { query.to_lowercase() } else { query.to_string() };
     let mut out = Vec::new();
     for (i, line) in text.lines.iter().enumerate() {
-        let hay = if fold { line.to_lowercase() } else { line.clone() };
-        // 小文字にすると長さが変わる文字もあるので、そのときは元の行で探す。
-        let hay = if hay.len() == line.len() { hay } else { line.clone() };
+        let hay = if fold { &lower[i] } else { line };
         let mut from = 0;
         while let Some(pos) = hay[from..].find(&needle) {
             let start = from + pos;
             let end = start + needle.len();
-            out.push(Range {
-                line: text.first_line + i as u64,
-                start: col_of(line, start),
-                end: col_of(line, end),
-            });
+            out.push(text.range(i, start, end));
             if out.len() >= MAX_MATCHES {
                 return out;
             }
@@ -66,6 +71,7 @@ impl Search {
         self.current = None;
         client.send(&Action::GrabKeys { grab: true })?;
         self.text = client.read_text(TextSource::All)?;
+        self.lower = lowercase_lines(&self.text);
         self.cols = self.text.cols;
         self.render(client)
     }
@@ -79,7 +85,7 @@ impl Search {
     }
 
     fn update(&mut self) {
-        self.matches = find_matches(&self.text, &self.query);
+        self.matches = find_matches(&self.text, &self.lower, &self.query);
         // 一番新しい (下の) 一致から始める。
         self.current = self.matches.len().checked_sub(1);
     }
@@ -116,7 +122,7 @@ impl Search {
                 col: 0,
                 text: bar,
                 fg: Some("#000000".into()),
-                bg: Some("#f6d32d".into()),
+                bg: Some(MATCH_COLOR.into()),
                 ..OverlayItem::default()
             }],
         })?;
@@ -209,23 +215,27 @@ mod tests {
         }
     }
 
+    fn find(t: &TextResult, query: &str) -> Vec<Range> {
+        find_matches(t, &lowercase_lines(t), query)
+    }
+
     #[test]
     fn 小文字だけなら大文字と小文字を区別しない() {
         let t = text(&["Error: x", "no error", "ERROR"]);
-        assert_eq!(find_matches(&t, "error").len(), 3);
-        assert_eq!(find_matches(&t, "Error").len(), 1);
+        assert_eq!(find(&t, "error").len(), 3);
+        assert_eq!(find(&t, "Error").len(), 1);
     }
 
     #[test]
     fn 全角を含む行の列() {
         let t = text(&["日本語のerror"]);
-        let m = find_matches(&t, "error");
+        let m = find(&t, "error");
         assert_eq!(m, [Range { line: 10, start: 8, end: 13 }]);
     }
 
     #[test]
     fn 前と次は端で回る() {
-        let mut s = Search { matches: find_matches(&text(&["a a a"]), "a"), ..Search::default() };
+        let mut s = Search { matches: find(&text(&["a a a"]), "a"), ..Search::default() };
         s.current = Some(0);
         s.step(true);
         assert_eq!(s.current, Some(2));

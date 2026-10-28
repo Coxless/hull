@@ -174,13 +174,14 @@ fn default_plugins() -> Vec<PluginConfig> {
 }
 
 pub fn config_path() -> PathBuf {
-    let base = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .unwrap_or_else(|| {
-            PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config")
-        });
-    base.join("hull").join("hull.toml")
+    xdg_dir("XDG_CONFIG_HOME", ".config").join("hull").join("hull.toml")
+}
+
+/// XDG のディレクトリ (`var` が絶対パスでなければ `$HOME/fallback`)。
+pub fn xdg_dir(var: &str, fallback: &str) -> PathBuf {
+    std::env::var_os(var).map(PathBuf::from).filter(|p| p.is_absolute()).unwrap_or_else(|| {
+        PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(fallback)
+    })
 }
 
 impl Config {

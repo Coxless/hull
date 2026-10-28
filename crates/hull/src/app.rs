@@ -175,8 +175,6 @@ pub struct App {
 
     /// バッファの倍率 (分数スケールなら 1.25 など)。
     pub scale: f32,
-    pub scale120: Option<u32>,
-    pub int_scale: i32,
     /// 窓の大きさ (論理ピクセル)。
     pub size: (u32, u32),
     pub configured: bool,
@@ -185,6 +183,8 @@ pub struct App {
     sync_timer: Option<RegistrationToken>,
     /// 出力が止まってから履歴の行を詰めるタイマー。
     compact_timer: Option<RegistrationToken>,
+    /// 最後に出力を受け取った時刻 (止まってから履歴の行を詰めるため)。
+    last_output: Instant,
     pub focused: bool,
     pub maximized: bool,
     pub tiled: bool,
@@ -257,67 +257,50 @@ fn key_from_keysym(keysym: Keysym) -> Option<Key> {
     })
 }
 
+/// 名前で書くキー。キーバインドとプラグインで使う名前は、この表から両方向に引く。
+const KEY_NAMES: [(&str, Key); 18] = [
+    ("plus", Key::Char('+')),
+    ("minus", Key::Char('-')),
+    ("equal", Key::Char('=')),
+    ("space", Key::Char(' ')),
+    ("enter", Key::Enter),
+    ("tab", Key::Tab),
+    ("backspace", Key::Backspace),
+    ("escape", Key::Escape),
+    ("up", Key::Up),
+    ("down", Key::Down),
+    ("left", Key::Left),
+    ("right", Key::Right),
+    ("home", Key::Home),
+    ("end", Key::End),
+    ("pageup", Key::PageUp),
+    ("pagedown", Key::PageDown),
+    ("insert", Key::Insert),
+    ("delete", Key::Delete),
+];
+
 /// キーの名前から、キーに戻す (プラグインが返したキーを打つため)。
 pub fn key_from_name(name: &str) -> Option<Key> {
-    Some(match name {
-        "plus" => Key::Char('+'),
-        "minus" => Key::Char('-'),
-        "equal" => Key::Char('='),
-        "space" => Key::Char(' '),
-        "enter" => Key::Enter,
-        "tab" => Key::Tab,
-        "backspace" => Key::Backspace,
-        "escape" => Key::Escape,
-        "up" => Key::Up,
-        "down" => Key::Down,
-        "left" => Key::Left,
-        "right" => Key::Right,
-        "home" => Key::Home,
-        "end" => Key::End,
-        "pageup" => Key::PageUp,
-        "pagedown" => Key::PageDown,
-        "insert" => Key::Insert,
-        "delete" => Key::Delete,
-        f if f.len() > 1
-            && f.starts_with('f')
-            && f[1..].parse::<u8>().is_ok_and(|n| (1..=12).contains(&n)) =>
-        {
-            Key::F(f[1..].parse().ok()?)
-        }
-        c => {
-            let mut chars = c.chars();
-            let ch = chars.next()?;
-            if chars.next().is_some() {
-                return None;
-            }
-            Key::Char(ch)
-        }
-    })
+    if let Some(&(_, key)) = KEY_NAMES.iter().find(|(n, _)| *n == name) {
+        return Some(key);
+    }
+    if let Some(n) = name.strip_prefix('f').and_then(|n| n.parse::<u8>().ok()) {
+        return (1..=12).contains(&n).then_some(Key::F(n));
+    }
+    let mut chars = name.chars();
+    let ch = chars.next()?;
+    chars.next().is_none().then_some(Key::Char(ch))
 }
 
 /// キーバインドで使うキーの名前。
 pub fn key_name(key: Key) -> String {
+    if let Some((name, _)) = KEY_NAMES.iter().find(|(_, k)| *k == key) {
+        return (*name).into();
+    }
     match key {
-        Key::Char('+') => "plus".into(),
-        Key::Char('-') => "minus".into(),
-        Key::Char('=') => "equal".into(),
-        Key::Char(' ') => "space".into(),
         Key::Char(c) => c.to_string(),
-        Key::Enter => "enter".into(),
-        Key::Tab => "tab".into(),
-        Key::Backspace => "backspace".into(),
-        Key::Escape => "escape".into(),
-        Key::Up => "up".into(),
-        Key::Down => "down".into(),
-        Key::Left => "left".into(),
-        Key::Right => "right".into(),
-        Key::Home => "home".into(),
-        Key::End => "end".into(),
-        Key::PageUp => "pageup".into(),
-        Key::PageDown => "pagedown".into(),
-        Key::Insert => "insert".into(),
-        Key::Delete => "delete".into(),
         Key::F(n) => format!("f{n}"),
+        _ => unreachable!("名前の表にないキー: {key:?}"),
     }
 }
 
@@ -449,14 +432,13 @@ impl App {
             font_points: points,
             config,
             scale: 1.0,
-            scale120: None,
-            int_scale: 1,
             size,
             configured: false,
             frame_pending: false,
             needs_draw: true,
             sync_timer: None,
             compact_timer: None,
+            last_output: Instant::now(),
             focused: false,
             maximized: false,
             tiled: false,
@@ -593,10 +575,16 @@ impl App {
     /// 端末に出力を流したあとの片づけ (応答、イベント、描画)。
     fn after_output(&mut self) {
         // 大量の出力のあいだは履歴の行を詰めず、止まってからまとめて詰める。
+        self.last_output = Instant::now();
         if self.compact_timer.is_none() {
             self.compact_timer = self
                 .handle
                 .insert_source(Timer::from_duration(COMPACT_DELAY), |_, _, app: &mut App| {
+                    // まだ出力が続いていれば、止まってから COMPACT_DELAY たつまで待つ。
+                    let due = app.last_output + COMPACT_DELAY;
+                    if Instant::now() < due {
+                        return TimeoutAction::ToInstant(due);
+                    }
                     app.compact_timer = None;
                     app.term.compact_history();
                     // 詰めて空いたメモリは細切れなので、malloc に OS へ返させる。
@@ -704,7 +692,8 @@ impl App {
             let (w, h) = self.window_size();
             vp.set_destination(w as i32, h as i32);
         } else {
-            self.window.wl_surface().set_buffer_scale(self.int_scale);
+            // 分数スケールが使えないときは、倍率は整数。
+            self.window.wl_surface().set_buffer_scale(self.scale as i32);
         }
         if let Some(gfx) = &mut self.gfx {
             let _ =
@@ -793,9 +782,8 @@ impl App {
         let layout = self.layout();
         let selection = self.selection.map(|s| s.range(&self.term));
         let (highlights, overlays) = self.plugins.visible_decorations(&self.term);
-        let title = self.title.clone();
         let header = self.client_decorations.then(|| Header {
-            title: &title,
+            title: &self.title,
             focused: self.focused,
             hovered: self.hovered,
             maximized: self.maximized,
@@ -805,7 +793,6 @@ impl App {
             term: &self.term,
             scheme: &self.scheme,
             layout,
-            cursor_visible: self.term.modes.show_cursor,
             focused: self.focused,
             selection,
             highlights: &highlights,
@@ -923,7 +910,6 @@ impl App {
         if shown != self.title {
             self.window.set_title(shown.clone());
             self.title = shown;
-            self.needs_draw = true;
             self.request_draw();
         }
     }
@@ -1515,8 +1501,7 @@ impl App {
         self.term.link(cell.link).map(str::to_string)
     }
 
-    pub fn pointer_press(&mut self, button: u32, serial: u32, time: u32) {
-        let _ = time;
+    pub fn pointer_press(&mut self, button: u32, serial: u32) {
         self.last_serial = serial;
         let (x, y) = self.pointer_pos;
 

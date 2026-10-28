@@ -323,15 +323,13 @@ pub struct Overlay {
     pub col: usize,
     pub text: String,
     pub fg: Rgb,
-    pub bg: Option<Rgb>,
+    pub bg: Rgb,
 }
 
 pub struct Scene<'a> {
     pub term: &'a Terminal,
     pub scheme: &'a Scheme,
     pub layout: Layout,
-    /// カーソルを見せるか (アプリが隠していない、かつ一番下を見ている)。
-    pub cursor_visible: bool,
     pub focused: bool,
     pub selection: Option<(Point, Point)>,
     pub highlights: &'a [Highlight],
@@ -361,6 +359,9 @@ struct RowInstances {
 
 pub struct Renderer {
     program: glow::Program,
+    u_viewport: Option<glow::UniformLocation>,
+    u_mask_size: Option<glow::UniformLocation>,
+    u_color_size: Option<glow::UniformLocation>,
     vao: glow::VertexArray,
     vbo: glow::Buffer,
     vbo_capacity: usize,
@@ -387,6 +388,26 @@ fn rgba(rgb: Rgb, alpha: u8) -> [u8; 4] {
 fn mix(a: Rgb, b: Rgb, t: f32) -> Rgb {
     let m = |x: u8, y: u8| (f32::from(x) * (1.0 - t) + f32::from(y) * t).round() as u8;
     [m(a[0], b[0]), m(a[1], b[1]), m(a[2], b[2])]
+}
+
+/// 塗りつぶした四角形。
+fn solid(rect: [f32; 4], c: Rgb) -> Inst {
+    Inst { rect, color: rgba(c, 255), kind: KIND_RECT, ..Inst::default() }
+}
+
+/// 色を指定していないセルの背景色 (画面全体の反転を効かせたあと)。
+fn default_bg(term: &Terminal) -> Rgb {
+    let index = if term.modes.reverse_video {
+        hull_term::term::COLOR_FG
+    } else {
+        hull_term::term::COLOR_BG
+    };
+    term.palette.get(index)
+}
+
+/// カーソルを見せるか (アプリが隠していない、かつ一番下を見ている)。
+fn show_cursor(term: &Terminal) -> bool {
+    term.modes.show_cursor && term.display_offset() == 0
 }
 
 fn hash<T: Hash>(value: &T) -> u64 {
@@ -447,6 +468,9 @@ impl Renderer {
             let color = Atlas::new(gl, 256, 2048, true);
             Ok(Renderer {
                 program,
+                u_viewport: gl.get_uniform_location(program, "u_viewport"),
+                u_mask_size: gl.get_uniform_location(program, "u_mask_size"),
+                u_color_size: gl.get_uniform_location(program, "u_color_size"),
                 vao,
                 vbo,
                 vbo_capacity: 0,
@@ -472,11 +496,16 @@ impl Renderer {
 
     /// フォントが変わったときに、グリフと行の作り置きを捨てる。
     pub fn clear_glyphs(&mut self, gl: &glow::Context) {
+        self.drop_caches();
+        self.mask.allocate(gl);
+        self.color.allocate(gl);
+    }
+
+    /// グリフと行の作り置きを捨てる (次のフレームで作り直す)。
+    fn drop_caches(&mut self) {
         self.glyphs.clear();
         *self.ascii = [[None; 128]; 4];
         self.rows.clear();
-        self.mask.allocate(gl);
-        self.color.allocate(gl);
         self.history.clear();
     }
 
@@ -530,10 +559,7 @@ impl Renderer {
                 // いっぱいになったら大きくして、作り置きをすべて捨てる (次のフレームで作り直す)。
                 atlas.grow(gl);
                 let at = atlas.reserve(g.width, g.height)?;
-                self.glyphs.clear();
-                *self.ascii = [[None; 128]; 4];
-                self.rows.clear();
-                self.history.clear();
+                self.drop_caches();
                 at
             }
         };
@@ -583,7 +609,6 @@ impl Renderer {
         (fg, bg)
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn build_row(
         &mut self,
         gl: &glow::Context,
@@ -594,23 +619,14 @@ impl Renderer {
     ) -> RowInstances {
         let m = fonts.metrics;
         let (cw, ch) = (m.cell_width as f32, m.cell_height as f32);
-        let default_bg = if term.modes.reverse_video {
-            term.palette.get(hull_term::term::COLOR_FG)
-        } else {
-            term.palette.get(hull_term::term::COLOR_BG)
-        };
+        let default_bg = default_bg(term);
         let light = (cw / 8.0).round().max(1.0).min(m.stroke as f32 * 2.0).max(1.0);
         let mut back = Vec::new();
         let mut front = Vec::new();
         let mut run: Option<(usize, usize, Rgb)> = None;
         let flush = |run: &mut Option<(usize, usize, Rgb)>, back: &mut Vec<Inst>| {
             if let Some((start, end, color)) = run.take() {
-                back.push(Inst {
-                    rect: [start as f32 * cw, 0.0, (end - start) as f32 * cw, ch],
-                    color: rgba(color, 255),
-                    kind: KIND_RECT,
-                    ..Inst::default()
-                });
+                back.push(solid([start as f32 * cw, 0.0, (end - start) as f32 * cw, ch], color));
             }
         };
 
@@ -640,18 +656,12 @@ impl Renderer {
                 flush(&mut run, &mut back);
             }
             let x = col as f32 * cw;
-            self.push_glyphs(gl, fonts, &mut front, cell.ch, &cell, row, col, x, 0.0, fg, light);
+            self.push_glyphs(gl, fonts, &mut front, &cell, row, col, x, 0.0, fg, light);
 
             let width = span as f32 * cw;
             let stroke = m.stroke as f32;
-            let underline = |y: f32, front: &mut Vec<Inst>| {
-                front.push(Inst {
-                    rect: [x, y, width, stroke],
-                    color: rgba(fg, 255),
-                    kind: KIND_RECT,
-                    ..Inst::default()
-                });
-            };
+            let underline =
+                |y: f32, front: &mut Vec<Inst>| front.push(solid([x, y, width, stroke], fg));
             if cell.flags & (flags::UNDERLINE | flags::CURLY_UNDERLINE) != 0 {
                 underline(m.underline_position as f32, &mut front);
             }
@@ -675,7 +685,6 @@ impl Renderer {
         gl: &glow::Context,
         fonts: &mut Fonts,
         out: &mut Vec<Inst>,
-        c: char,
         cell: &Cell,
         row: &Row,
         col: usize,
@@ -684,6 +693,7 @@ impl Renderer {
         fg: Rgb,
         light: f32,
     ) {
+        let c = cell.ch;
         if c == ' ' && cell.flags & flags::COMBINING == 0 {
             return;
         }
@@ -711,15 +721,8 @@ impl Renderer {
         let style =
             Style { bold: cell.flags & flags::BOLD != 0, italic: cell.flags & flags::ITALIC != 0 };
         let cells = if cell.flags & flags::WIDE != 0 { 2 } else { 1 };
-        let mut chars = vec![c];
-        if cell.flags & flags::COMBINING != 0 {
-            chars.extend(
-                row.combining.iter().filter(|(cc, _)| *cc as usize == col).map(|(_, ch)| *ch),
-            );
-        }
-        for ch in chars {
-            let cells = if ch == c { cells } else { char_width(c).max(1) as u8 };
-            if let Some(g) = self.glyph(gl, fonts, ch, style, cells) {
+        let mut push = |this: &mut Self, ch: char, cells: u8| {
+            if let Some(g) = this.glyph(gl, fonts, ch, style, cells) {
                 let gx = x + f32::from(g.left);
                 let gy = y + m.baseline as f32 - f32::from(g.top);
                 out.push(Inst {
@@ -728,6 +731,15 @@ impl Renderer {
                     color: rgba(fg, 255),
                     kind: if g.color { KIND_COLOR } else { KIND_MASK },
                 });
+            }
+        };
+        push(self, c, cells);
+        if cell.flags & flags::COMBINING != 0 {
+            let combining_cells = char_width(c).max(1) as u8;
+            for &(cc, ch) in &row.combining {
+                if cc as usize == col {
+                    push(self, ch, if ch == c { cells } else { combining_cells });
+                }
             }
         }
     }
@@ -755,7 +767,7 @@ impl Renderer {
             }
             let flags = if bold { flags::BOLD } else { 0 } | if w == 2 { flags::WIDE } else { 0 };
             let cell = Cell { ch: c, flags, ..Cell::BLANK };
-            self.push_glyphs(gl, fonts, out, c, &cell, &row, 0, x + col as f32 * cw, y, fg, 1.0);
+            self.push_glyphs(gl, fonts, out, &cell, &row, 0, x + col as f32 * cw, y, fg, 1.0);
             col += w;
         }
         col
@@ -765,7 +777,7 @@ impl Renderer {
     fn row_marks(scene: &Scene, rows: usize, palette_key: u64) -> Vec<u64> {
         let term = scene.term;
         let (crow, ccol) = term.cursor();
-        let show_cursor = scene.cursor_visible && term.display_offset() == 0;
+        let show_cursor = show_cursor(term);
         (0..rows)
             .map(|r| {
                 let mut h = DefaultHasher::new();
@@ -892,11 +904,7 @@ impl Renderer {
 
         let mut insts = std::mem::take(&mut self.scratch);
         insts.clear();
-        let default_bg = if term.modes.reverse_video {
-            term.palette.get(hull_term::term::COLOR_FG)
-        } else {
-            term.palette.get(hull_term::term::COLOR_BG)
-        };
+        let default_bg = default_bg(term);
 
         // 行のインスタンスを集める (作り置きがなければ作る)。
         let mut fronts: Vec<(f32, (bool, u64))> = Vec::new();
@@ -934,34 +942,30 @@ impl Renderer {
                 let start = if abs == s.line { s.col } else { 0 };
                 let end = if abs == e.line { (e.col + 1).min(cols) } else { cols };
                 if start < end {
-                    insts.push(Inst {
-                        rect: [
+                    insts.push(solid(
+                        [
                             ox + start as f32 * cw,
                             oy + r as f32 * chh,
                             (end - start) as f32 * cw,
                             chh,
                         ],
-                        color: rgba(scene.scheme.selection, 255),
-                        kind: KIND_RECT,
-                        ..Inst::default()
-                    });
+                        scene.scheme.selection,
+                    ));
                 }
             }
         }
         for hl in scene.highlights.iter().filter(|h| in_band(h.row) && h.row < rows) {
             let (start, end) = (hl.start.min(cols), hl.end.min(cols));
             if start < end {
-                insts.push(Inst {
-                    rect: [
+                insts.push(solid(
+                    [
                         ox + start as f32 * cw,
                         oy + hl.row as f32 * chh,
                         (end - start) as f32 * cw,
                         chh,
                     ],
-                    color: rgba(hl.color, 255),
-                    kind: KIND_RECT,
-                    ..Inst::default()
-                });
+                    hl.color,
+                ));
             }
         }
 
@@ -976,29 +980,22 @@ impl Renderer {
 
         // カーソル。
         let (crow, ccol) = term.cursor();
-        if scene.cursor_visible && term.display_offset() == 0 && crow < rows && in_band(crow) {
+        if show_cursor(term) && crow < rows && in_band(crow) {
             let cell = term.grid().row(crow).cell(ccol);
             let wide = if cell.flags & flags::WIDE != 0 { 2.0 } else { 1.0 };
             let (x, y) = (ox + ccol as f32 * cw, oy + crow as f32 * chh);
             let cursor_color = term.palette.get(hull_term::term::COLOR_CURSOR);
             let thin = (m.stroke as f32).max((layout.scale).round());
-            let rect = |x: f32, y: f32, w: f32, h: f32, c: Rgb| Inst {
-                rect: [x, y, w, h],
-                color: rgba(c, 255),
-                kind: KIND_RECT,
-                ..Inst::default()
-            };
+            let rect = |x: f32, y: f32, w: f32, h: f32, c: Rgb| solid([x, y, w, h], c);
             match (scene.focused, term.modes.cursor_shape) {
                 (true, CursorShape::Block) if scene.preedit.is_none() => {
                     insts.push(rect(x, y, cw * wide, chh, cursor_color));
                     // カーソルの下の文字は背景色で描き直す。
                     if cell.ch != ' ' && cell.flags & flags::WIDE_SPACER == 0 {
-                        let row = term.grid().row(crow).clone();
+                        let row = term.grid().row(crow);
                         let (_, bg) = Self::cell_colors(term, &cell);
                         let fg = if bg == cursor_color { default_bg } else { bg };
-                        self.push_glyphs(
-                            gl, fonts, &mut insts, cell.ch, &cell, &row, ccol, x, y, fg, 1.0,
-                        );
+                        self.push_glyphs(gl, fonts, &mut insts, &cell, row, ccol, x, y, fg, 1.0);
                     }
                 }
                 (true, CursorShape::Bar) => insts.push(rect(x, y, thin, chh, cursor_color)),
@@ -1015,7 +1012,7 @@ impl Renderer {
             }
             // IME の変換中の文字は、カーソルの位置に下線つきで出す。
             if let Some(text) = scene.preedit.filter(|t| !t.is_empty()) {
-                let width: usize = text.chars().map(char_width).sum();
+                let width = hull_plugin::width(text);
                 let fg = term.palette.get(hull_term::term::COLOR_FG);
                 insts.push(rect(x, y, width as f32 * cw, chh, default_bg));
                 self.push_text(gl, fonts, &mut insts, text, x, y, fg, false);
@@ -1026,15 +1023,8 @@ impl Renderer {
         // プラグインのオーバーレイは、いちばん上に出す。
         for ov in scene.overlays.iter().filter(|o| in_band(o.row) && o.row < rows) {
             let (x, y) = (ox + ov.col as f32 * cw, oy + ov.row as f32 * chh);
-            let width: usize = ov.text.chars().map(char_width).sum();
-            if let Some(bg) = ov.bg {
-                insts.push(Inst {
-                    rect: [x, y, width as f32 * cw, chh],
-                    color: rgba(bg, 255),
-                    kind: KIND_RECT,
-                    ..Inst::default()
-                });
-            }
+            let width = hull_plugin::width(&ov.text);
+            insts.push(solid([x, y, width as f32 * cw, chh], ov.bg));
             self.push_text(gl, fonts, &mut insts, &ov.text, x, y, ov.fg, true);
         }
 
@@ -1049,21 +1039,11 @@ impl Renderer {
         unsafe {
             gl.viewport(0, 0, layout.width as i32, layout.height as i32);
             gl.use_program(Some(self.program));
-            gl.uniform_2_f32(
-                gl.get_uniform_location(self.program, "u_viewport").as_ref(),
-                layout.width as f32,
-                layout.height as f32,
-            );
-            gl.uniform_2_f32(
-                gl.get_uniform_location(self.program, "u_mask_size").as_ref(),
-                self.mask.size as f32,
-                self.mask.size as f32,
-            );
-            gl.uniform_2_f32(
-                gl.get_uniform_location(self.program, "u_color_size").as_ref(),
-                self.color.size as f32,
-                self.color.size as f32,
-            );
+            gl.uniform_2_f32(self.u_viewport.as_ref(), layout.width as f32, layout.height as f32);
+            let mask_size = self.mask.size as f32;
+            gl.uniform_2_f32(self.u_mask_size.as_ref(), mask_size, mask_size);
+            let color_size = self.color.size as f32;
+            gl.uniform_2_f32(self.u_color_size.as_ref(), color_size, color_size);
             gl.active_texture(glow::TEXTURE0);
             gl.bind_texture(glow::TEXTURE_2D, Some(self.mask.texture));
             gl.active_texture(glow::TEXTURE1);

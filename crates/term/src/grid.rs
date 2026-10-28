@@ -62,10 +62,6 @@ impl Grid {
         self.lines.len() - self.rows
     }
 
-    pub fn max_history(&self) -> usize {
-        self.max_history
-    }
-
     pub fn set_max_history(&mut self, max: usize) {
         self.max_history = max;
         while self.history_len() > max {
@@ -84,19 +80,15 @@ impl Grid {
         self.unpacked = 0;
     }
 
-    fn base(&self) -> usize {
-        self.lines.len() - self.rows
-    }
-
     /// 画面の `r` 行目。
     pub fn row(&self, r: usize) -> &Row {
-        &self.lines[self.base() + r]
+        &self.lines[self.history_len() + r]
     }
 
     /// 画面の `r` 行目を書き換える。描画のために世代を進める。
     pub fn row_mut(&mut self, r: usize) -> &mut Row {
         let generation = self.bump();
-        let base = self.base();
+        let base = self.history_len();
         let row = &mut self.lines[base + r];
         row.generation = generation;
         row
@@ -105,12 +97,12 @@ impl Grid {
     /// `offset` 行だけ履歴をさかのぼったときに見える `r` 行目。
     pub fn visible_row(&self, offset: usize, r: usize) -> &Row {
         let offset = offset.min(self.history_len());
-        &self.lines[self.base() - offset + r]
+        &self.lines[self.history_len() - offset + r]
     }
 
     /// 画面の `r` 行目の絶対番号。
     pub fn abs_of_screen(&self, r: usize) -> u64 {
-        self.dropped + (self.base() + r) as u64
+        self.dropped + (self.history_len() + r) as u64
     }
 
     /// 残っている中でいちばん古い行の絶対番号。
@@ -157,7 +149,7 @@ impl Grid {
 
     /// 画面の `top..=bottom` を `n` 行上げる。上からあふれた行は捨てる。
     pub fn scroll_region_up(&mut self, top: usize, bottom: usize, n: usize, fill: Cell) {
-        let base = self.base();
+        let base = self.history_len();
         for _ in 0..n.min(bottom + 1 - top) {
             let mut row = self.lines.remove(base + top).expect("範囲は画面の中");
             row.reset(self.cols, fill);
@@ -168,7 +160,7 @@ impl Grid {
 
     /// 画面の `top..=bottom` を `n` 行下げる。下からあふれた行は捨てる。
     pub fn scroll_region_down(&mut self, top: usize, bottom: usize, n: usize, fill: Cell) {
-        let base = self.base();
+        let base = self.history_len();
         for _ in 0..n.min(bottom + 1 - top) {
             let mut row = self.lines.remove(base + bottom).expect("範囲は画面の中");
             row.reset(self.cols, fill);
@@ -213,7 +205,7 @@ impl Grid {
                 shrink -= 1;
             }
             for i in 0..shrink {
-                let base = self.base();
+                let base = self.history_len();
                 self.lines[base + i].pack();
             }
             self.rows -= shrink;
@@ -234,7 +226,7 @@ impl Grid {
         }
 
         self.cols = cols;
-        let base = self.base();
+        let base = self.history_len();
         for i in base..self.lines.len() {
             self.lines[i].resize(cols);
         }

@@ -4,7 +4,7 @@
 //! 短いラベルを付ける。ラベルを打つと、その URL を開く (`copy` ならクリップボードに写す)。
 //! Esc でやめる。
 
-use hull_plugin::{Action, Client, HostEvent, OverlayItem, Range, TextSource, col_of};
+use hull_plugin::{Action, Client, HostEvent, OverlayItem, Range, TextSource};
 
 const SCHEMES: &[&str] =
     &["https://", "http://", "file://", "ftp://", "ssh://", "git://", "mailto:"];
@@ -88,11 +88,7 @@ impl Hints {
         let mut found = Vec::new();
         for (i, line) in text.lines.iter().enumerate() {
             for (pos, url) in find_urls(line) {
-                let range = Range {
-                    line: text.first_line + i as u64,
-                    start: col_of(line, pos),
-                    end: col_of(line, pos + url.len()),
-                };
+                let range = text.range(i, pos, pos + url.len());
                 found.push((url, range));
             }
         }
@@ -194,6 +190,7 @@ fn main() -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hull_plugin::col_of;
 
     #[test]
     fn url_を見つける() {

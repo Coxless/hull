@@ -21,13 +21,7 @@ pub struct Desktop {
 
 /// 起動を速くするための覚え書きを置く場所 (`~/.cache/hull`)。
 pub fn cache_dir() -> std::path::PathBuf {
-    let base = std::env::var_os("XDG_CACHE_HOME")
-        .map(std::path::PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .unwrap_or_else(|| {
-            std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".cache")
-        });
-    base.join("hull")
+    crate::config::xdg_dir("XDG_CACHE_HOME", ".cache").join("hull")
 }
 
 impl Desktop {
