@@ -23,21 +23,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: ビルドに要るライブラリ
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libwayland-dev libxkbcommon-dev libfontconfig-dev libegl-dev
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
 
-      # 作り直しの途中でコードがまだないあいだは、検査を飛ばす。
-      - name: Rust の整形・clippy・ビルド・テスト
-        run: |
-          if [ ! -f Cargo.toml ]; then
-            echo "Cargo.toml がまだないので、検査を飛ばします"
-            exit 0
-          fi
-          cargo fmt --all --check
-          cargo clippy --workspace --all-targets -- -D warnings
-          cargo build --workspace
-          cargo test --workspace
+      - uses: Swatinem/rust-cache@v2
+
+      - name: 整形
+        run: cargo fmt --all --check
+
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: ビルド
+        run: cargo build --workspace
+
+      - name: テスト
+        run: cargo test --workspace
 
   package:
     name: Package

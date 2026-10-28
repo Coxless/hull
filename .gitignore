@@ -11,3 +11,7 @@
 target/
 build/
 .env
+
+# ベンチの結果 (公開するものは docs/bench.md にまとめる)
+bench/results/
+__pycache__/

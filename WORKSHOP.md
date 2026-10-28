@@ -9,7 +9,10 @@
 hull-terminal/
 ├── .workshop/
 │   └── dev.yaml    # Workshop 定義 (Rust + actions)
-├── docs/           # コンセプト
+├── crates/         # 本体 (hull)、端末の中核 (term)、プラグインのプロトコル (plugin)
+├── plugins/        # 同梱のプラグイン
+├── bench/          # ベンチマーク
+├── docs/           # コンセプト、プラグイン、ベンチの結果
 ├── .gitignore
 └── WORKSHOP.md     # この説明
 ```
@@ -19,7 +22,7 @@ hull-terminal/
 | ツール | 入手元 | 用途 |
 | ------ | ------ | ---- |
 | Rust (cargo / clippy / rustfmt) | `rust` SDK (latest/stable) | 本体のビルド |
-| gcc, pkg-config | `setup` で apt | ビルド (Wayland などのライブラリは Phase 1 で足す) |
+| gcc, pkg-config, libwayland-dev, libxkbcommon-dev, libfontconfig-dev, libegl-dev | `setup` で apt | ビルド |
 
 ## 前提条件
 
@@ -53,14 +56,16 @@ workshop run -- setup      # 前提パッケージを入れ、`cargo fetch` を�
 | `test`  | `cargo test --workspace`             | `workshop run -- test`  |
 | `lint`  | `cargo clippy`                       | `workshop run -- lint`  |
 | `fmt`   | `cargo fmt`                          | `workshop run -- fmt`   |
+| `deb`   | `.deb` を作る (`target/deb/`)        | `workshop run -- deb`   |
 
-作り直しの途中で `Cargo.toml` がまだないあいだは、どの action も何もしません。
 引数は cargo 側に渡ります (例: `workshop run -- test -p <crate>`)。
 
 ### 3. アプリの起動について
 
 hull は Wayland のウィンドウを開くため、ディスプレイのないワークショップ内ではそのままでは動きません。
-画面の動作確認はホストで行います (手順は Phase 1 で書きます)。
+画面の動作確認はホストで行います。ワークショップでビルドした `target/debug/hull` を、ホストでそのまま起動できます
+(ホストに要るのは実行用のライブラリだけで、Ubuntu のデスクトップには最初から入っています)。
+キーを打てない確認には `HULL_SCREENSHOT` と `HULL_TEST_KEYS` を使います (README.md の「開発」)。
 
 ### 4. 定義を変更したとき
 
