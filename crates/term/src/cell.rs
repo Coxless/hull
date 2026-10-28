@@ -31,17 +31,6 @@ pub mod flags {
     /// 結合文字が行の `combining` に入っている。
     pub const COMBINING: u16 = 1 << 12;
 
-    /// 描画に関わらない属性を除いた、ペン (SGR) が持つ属性。
-    pub const PEN: u16 = BOLD
-        | DIM
-        | ITALIC
-        | UNDERLINE
-        | BLINK
-        | INVERSE
-        | HIDDEN
-        | STRIKE
-        | DOUBLE_UNDERLINE
-        | CURLY_UNDERLINE;
     pub const ANY_UNDERLINE: u16 = UNDERLINE | DOUBLE_UNDERLINE | CURLY_UNDERLINE;
 }
 

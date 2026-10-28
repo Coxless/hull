@@ -110,6 +110,18 @@ pub struct TextResult {
     pub alt_screen: bool,
 }
 
+impl TextResult {
+    /// `lines[i]` の `start..end` バイト目を、画面の範囲にする。
+    pub fn range(&self, i: usize, start: usize, end: usize) -> Range {
+        let line = &self.lines[i];
+        Range {
+            line: self.first_line + i as u64,
+            start: col_of(line, start),
+            end: col_of(line, end),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TextSource {

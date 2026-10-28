@@ -296,9 +296,7 @@ impl PluginHost {
                         col: item.col,
                         text: item.text.clone(),
                         fg: item.fg.as_deref().and_then(parse_rgb).unwrap_or(DEFAULT_OVERLAY_FG),
-                        bg: Some(
-                            item.bg.as_deref().and_then(parse_rgb).unwrap_or(DEFAULT_OVERLAY_BG),
-                        ),
+                        bg: item.bg.as_deref().and_then(parse_rgb).unwrap_or(DEFAULT_OVERLAY_BG),
                     });
                 }
             }
@@ -432,20 +430,38 @@ impl PluginHost {
 }
 
 fn stop(plugin: &mut Plugin, handle: &LoopHandle<'static, App>) {
+    teardown(plugin, handle, true);
+    if let Some(t) = plugin.restart_timer.take() {
+        handle.remove(t);
+    }
+}
+
+/// プロセスを止め、プラグインが画面に付けたものを消す。読み出しの監視は、読み出しの中から呼ぶときは
+/// 呼び出し元が外すので、`remove_read` が偽なら残す。
+fn teardown(plugin: &mut Plugin, handle: &LoopHandle<'static, App>, remove_read: bool) {
     if let Some(mut run) = plugin.running.take() {
-        handle.remove(run.read_token);
+        if remove_read {
+            handle.remove(run.read_token);
+        }
         if let Some(t) = run.write_token {
             handle.remove(t);
         }
         let _ = run.child.kill();
         let _ = run.child.wait();
     }
-    if let Some(t) = plugin.restart_timer.take() {
-        handle.remove(t);
-    }
     plugin.highlights.clear();
     plugin.overlays.clear();
     plugin.title_mark = None;
+}
+
+/// `id` のものを消す。`None` ならすべて消す。
+fn clear_by_id<V>(map: &mut HashMap<String, V>, id: Option<String>) {
+    match id {
+        Some(id) => {
+            map.remove(&id);
+        }
+        None => map.clear(),
+    }
 }
 
 impl App {
@@ -514,16 +530,7 @@ impl App {
             self.plugins.grabber = None;
         }
         let Some(plugin) = self.plugins.find(name) else { return };
-        if let Some(mut run) = plugin.running.take() {
-            if let Some(t) = run.write_token {
-                handle.remove(t);
-            }
-            let _ = run.child.kill();
-            let _ = run.child.wait();
-        }
-        plugin.highlights.clear();
-        plugin.overlays.clear();
-        plugin.title_mark = None;
+        teardown(plugin, &handle, false);
 
         // 間をあけて起動し直す。1 分に何度も落ちるなら諦める。
         let now = Instant::now();
@@ -575,12 +582,7 @@ impl App {
             }
             Action::ClearHighlight { id } => {
                 if let Some(p) = self.plugins.find(name) {
-                    match id {
-                        Some(id) => {
-                            p.highlights.remove(&id);
-                        }
-                        None => p.highlights.clear(),
-                    }
+                    clear_by_id(&mut p.highlights, id);
                 }
                 self.request_draw();
             }
@@ -592,12 +594,7 @@ impl App {
             }
             Action::ClearOverlay { id } => {
                 if let Some(p) = self.plugins.find(name) {
-                    match id {
-                        Some(id) => {
-                            p.overlays.remove(&id);
-                        }
-                        None => p.overlays.clear(),
-                    }
+                    clear_by_id(&mut p.overlays, id);
                 }
                 self.request_draw();
             }

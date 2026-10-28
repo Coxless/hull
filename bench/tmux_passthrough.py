@@ -14,6 +14,8 @@ import sys
 import tempfile
 import time
 
+from hullbench import table
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 # 確かめるシーケンス (名前, 出すもの, 届いたときのイベント)。
@@ -75,10 +77,7 @@ def main():
         time.sleep(0.5)
     header = ["tmux の設定"] + [name for name, _, _ in SEQUENCES]
     print(f"{version}\n")
-    print("| " + " | ".join(header) + " |")
-    print("| " + " | ".join("---" for _ in header) + " |")
-    for r in rows:
-        print("| " + " | ".join(r) + " |")
+    print(table(header, rows), end="")
 
 
 if __name__ == "__main__":

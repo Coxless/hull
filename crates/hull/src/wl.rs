@@ -99,7 +99,6 @@ impl Dispatch2<WpFractionalScaleV1, App> for Protocol {
         _: &QueueHandle<App>,
     ) {
         if let wp_fractional_scale_v1::Event::PreferredScale { scale } = event {
-            app.scale120 = Some(scale);
             app.set_scale(scale as f32 / 120.0);
         }
     }
@@ -183,8 +182,7 @@ impl CompositorHandler for App {
     ) {
         // 分数スケールが使えるときは、そちらに従う。
         if self.fractional.is_none() {
-            self.int_scale = factor.max(1);
-            self.set_scale(self.int_scale as f32);
+            self.set_scale(factor.max(1) as f32);
         }
     }
 
@@ -430,8 +428,8 @@ impl PointerHandler for App {
                 PointerEventKind::Motion { .. } => {
                     self.pointer_motion(event.position.0, event.position.1)
                 }
-                PointerEventKind::Press { button, serial, time } => {
-                    self.pointer_press(button, serial, time)
+                PointerEventKind::Press { button, serial, .. } => {
+                    self.pointer_press(button, serial)
                 }
                 PointerEventKind::Release { button, serial, .. } => {
                     self.pointer_release(button, serial)
