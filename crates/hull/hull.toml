@@ -1,0 +1,65 @@
+# hull の設定ファイル (~/.config/hull/hull.toml)。
+# 保存すると、開いている窓にそのまま反映されます (シェルの設定だけは次の窓から)。
+# 書いていない項目は既定値になります。この例はすべて既定値です。
+
+[font]
+# fontconfig の名前。省略すると GNOME の等幅フォント (なければ "monospace")。
+# family = "Ubuntu Sans Mono"
+# ポイント。省略すると GNOME の等幅フォントの大きさ (なければ 11)。
+# size = 11
+# 文字がないときに探すフォントで優先する言語。省略すると $LANG から決めます。
+# lang = "ja"
+
+[window]
+padding = 4
+columns = 100
+lines = 30
+# "auto" は GNOME の明暗の設定に従います。"light" か "dark" で固定できます。
+theme = "auto"
+# サーバーが枠を描かない環境 (GNOME) で、見出しの帯を描きます。
+decorations = true
+
+[scrollback]
+lines = 10000
+
+[shell]
+# 省略するとログインシェル ($SHELL)。
+# program = "/usr/bin/zsh"
+# args = []
+
+[bell]
+# 窓が前にないときにベルが鳴ったら、窓に注意を向けさせます。
+attention = true
+
+# 色は明るいときと暗いときで別に書けます。書いた色だけが変わります。
+# [colors.dark]
+# foreground = "#ffffff"
+# background = "#1e1e1e"
+# cursor = "#ffffff"
+# selection = "#3d5a80"
+# palette = ["#171421", "#c01c28", "#26a269", "#a2734c", "#12488b", "#a347ba", "#2aa1b3", "#d0cfcc",
+#            "#5e5c64", "#f66151", "#33d17a", "#e9ad0c", "#2a7bde", "#c061cb", "#33c7de", "#ffffff"]
+
+# キーバインド。既定の割り当てを上書きします。action = "none" で消せます。
+# 本体のアクション: copy, paste, paste-primary, scroll-page-up, scroll-page-down,
+#   scroll-line-up, scroll-line-down, scroll-top, scroll-bottom,
+#   font-bigger, font-smaller, font-reset, prompt-previous, prompt-next
+# プラグインの呼び出し: "plugin:<プラグインの名前>/<名前>"
+#
+# [[keybind]]
+# keys = "ctrl+shift+f"
+# action = "plugin:search/search"
+
+# プラグイン。ここに書いたものだけを hull が起動します。
+# 1 つも書かなければ、同梱の 3 つ (search, url-hints, claude-status) を起動します。
+[[plugin]]
+name = "search"
+command = "/usr/lib/hull/plugins/hull-search"
+
+[[plugin]]
+name = "url-hints"
+command = "/usr/lib/hull/plugins/hull-url-hints"
+
+[[plugin]]
+name = "claude-status"
+command = "/usr/lib/hull/plugins/hull-claude-status"

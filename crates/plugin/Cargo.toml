@@ -1,0 +1,11 @@
+[package]
+name = "hull-plugin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "hull のプラグインのプロトコルと、プラグインを書くためのクライアント"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+unicode-width = "0.2"
