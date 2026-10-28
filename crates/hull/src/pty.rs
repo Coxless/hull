@@ -140,15 +140,6 @@ impl Pty {
         unsafe { libc::ioctl(self.master.as_raw_fd(), libc::TIOCSWINSZ, &ws) };
     }
 
-    /// 読めるだけ読む。シェルが終わったら `Ok(0)`。
-    pub fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        match self.master.read(buf) {
-            // 子が端末を閉じると EIO が返る。
-            Err(e) if e.raw_os_error() == Some(libc::EIO) => Ok(0),
-            r => r,
-        }
-    }
-
     /// 書く。書ききれない分はためて、`has_pending` が真になる。
     pub fn write(&mut self, data: &[u8]) {
         if self.pending.is_empty() {
@@ -190,6 +181,65 @@ impl Pty {
     pub fn reap(&mut self) {
         let _ = self.child.try_wait();
     }
+}
+
+/// 受け取り側が追いつかないときに、読むスレッドがためておく上限。これを超えたら読むのを待つ。
+const READ_AHEAD: usize = 8 << 20;
+
+/// PTY を読むスレッドの中身。読めるだけ読んで送る。受け取り側 (描画もする本体) が追いついていなければ、
+/// 読むのは止めずに 1 つにまとめてためておく (小さな書き込みが続くアプリを待たせないため)。
+/// シェルが終わったら `None` を送って終わる。
+pub fn read_loop(
+    fd: OwnedFd,
+    tx: smithay_client_toolkit::reexports::calloop::channel::SyncSender<Option<Vec<u8>>>,
+) {
+    use std::sync::mpsc::TrySendError;
+    let mut file = File::from(fd);
+    let mut buf = vec![0u8; 1 << 20];
+    let mut pending: Vec<u8> = Vec::new();
+    let mut closed = false;
+    while !closed || !pending.is_empty() {
+        if !closed && pending.len() < READ_AHEAD {
+            // ためたものがあれば、送り直すために 1ms で起きる。なければ読めるまで眠る。
+            let timeout = if pending.is_empty() { -1 } else { 1 };
+            let mut pfd = libc::pollfd { fd: file.as_raw_fd(), events: libc::POLLIN, revents: 0 };
+            // SAFETY: 1 つの pollfd を渡して待つ。
+            let ready = unsafe { libc::poll(&mut pfd, 1, timeout) };
+            if ready < 0 && io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
+                closed = true;
+            }
+            if ready > 0 {
+                loop {
+                    match file.read(&mut buf) {
+                        // 子が端末を閉じると EIO が返る。
+                        Ok(0) => closed = true,
+                        Err(e) if e.raw_os_error() == Some(libc::EIO) => closed = true,
+                        Ok(n) => {
+                            pending.extend_from_slice(&buf[..n]);
+                            if pending.len() < READ_AHEAD {
+                                continue;
+                            }
+                        }
+                        Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                        Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
+                        Err(_) => closed = true,
+                    }
+                    break;
+                }
+            }
+        } else if !pending.is_empty() {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        if pending.is_empty() {
+            continue;
+        }
+        match tx.try_send(Some(std::mem::take(&mut pending))) {
+            Ok(()) => {}
+            Err(TrySendError::Full(Some(back))) => pending = back,
+            Err(_) => return,
+        }
+    }
+    let _ = tx.send(None);
 }
 
 impl Drop for Pty {

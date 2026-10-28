@@ -234,7 +234,7 @@ impl Fonts {
                 None => {
                     missed = true;
                     let found = fonts
-                        .find(style, None)
+                        .find(style, None, false)
                         .ok_or_else(|| format!("フォント \"{family}\" が見つかりません"))?;
                     cache.entries.insert(key, found.clone());
                     found
@@ -261,7 +261,7 @@ impl Fonts {
         self.metrics = self.compute_metrics();
     }
 
-    fn find(&self, style: Style, ch: Option<char>) -> Option<Found> {
+    fn find(&self, style: Style, ch: Option<char>, color: bool) -> Option<Found> {
         let config = self.fc.get()?;
         let family = CString::new(self.family.as_str()).ok()?;
         // SAFETY: fontconfig の API を、作ったパターンが生きているあいだだけ使う。
@@ -284,8 +284,7 @@ impl Fonts {
                 fc::FcPatternAddCharSet(pattern, FC_CHARSET.as_ptr(), cs);
                 cs
             });
-            // 絵文字は、色つきのフォント (Noto Color Emoji) を優先する。
-            if ch.is_some_and(is_emoji) {
+            if color {
                 fc::FcPatternAddBool(pattern, FC_COLOR.as_ptr(), 1);
             }
             fc::FcConfigSubstitute(config, pattern, fc::FcMatchPattern);
@@ -413,7 +412,12 @@ impl Fonts {
     }
 
     fn fallback(&mut self, ch: char, style: Style) -> Option<(usize, u16)> {
-        let found = self.find(style, Some(ch))?;
+        // 絵文字は、色つきのフォント (Noto Color Emoji) を優先する。その範囲の記号でも、
+        // 色つきのフォントになければ (❯ など)、色を問わずに探し直す。
+        let found = is_emoji(ch)
+            .then(|| self.find(style, Some(ch), true))
+            .flatten()
+            .or_else(|| self.find(style, Some(ch), false))?;
         let fake_bold = style.bold && found.weight < FC_WEIGHT_DEMIBOLD;
         let fake_italic = style.italic && found.slant == FC_SLANT_ROMAN;
         let face = self.load(found, fake_bold, fake_italic).ok()?;

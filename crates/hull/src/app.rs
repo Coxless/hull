@@ -23,7 +23,7 @@ use smithay_client_toolkit::{
     },
     reexports::{
         calloop::{
-            Interest, LoopHandle, Mode, PostAction, RegistrationToken,
+            Interest, LoopHandle, Mode, PostAction, RegistrationToken, channel,
             generic::Generic,
             timer::{TimeoutAction, Timer},
         },
@@ -74,8 +74,8 @@ const RESIZE_BORDER: f64 = 6.0;
 const SYNC_TIMEOUT: Duration = Duration::from_millis(150);
 /// 出力が止まってから、履歴の行を詰めるまでの時間。
 const COMPACT_DELAY: Duration = Duration::from_secs(1);
-/// 1 回の読み出しで処理する上限。これを超えたら、ほかのイベント (キー入力など) を先に通す。
-const READ_BUDGET: usize = 1 << 20;
+/// PTY を読むスレッドから受け取るのを待つ塊の数。埋まっていれば、読むスレッドが 1 つにまとめてためる。
+const PTY_QUEUE: usize = 2;
 
 pub const BTN_LEFT: u32 = 0x110;
 pub const BTN_RIGHT: u32 = 0x111;
@@ -479,11 +479,21 @@ impl App {
 
     /// PTY やファイルの見張りをイベントループにつなぐ。
     pub fn register_sources(&mut self) -> Result<(), String> {
+        // PTY は別のスレッドで読む。描画しているあいだもシェルの出力を受け取れるので、
+        // 大量の出力で、シェルが hull の描画を待たされない。
         let fd = self.pty.dup_fd().map_err(|e| e.to_string())?;
+        let (tx, rx) = channel::sync_channel::<Option<Vec<u8>>>(PTY_QUEUE);
+        std::thread::Builder::new()
+            .name("hull-pty".into())
+            .spawn(move || crate::pty::read_loop(fd, tx))
+            .map_err(|e| e.to_string())?;
         self.handle
-            .insert_source(Generic::new(fd, Interest::READ, Mode::Level), |_, _, app: &mut App| {
-                app.on_pty_readable();
-                Ok(if app.exit { PostAction::Remove } else { PostAction::Continue })
+            .insert_source(rx, |event, _, app: &mut App| match event {
+                channel::Event::Msg(Some(data)) => app.on_pty_data(&data),
+                _ => {
+                    app.pty.reap();
+                    app.exit = true;
+                }
             })
             .map_err(|e| e.to_string())?;
 
@@ -558,6 +568,8 @@ impl App {
                         if let Some(gfx) = &mut app.gfx {
                             gfx.renderer.invalidate();
                         }
+                        // 画面が消えているとフレームのコールバックが来ないので、待たずに描く。
+                        app.frame_pending = false;
                         app.request_draw();
                         TimeoutAction::Drop
                     },
@@ -569,34 +581,11 @@ impl App {
 
     // ---- PTY ----
 
-    fn on_pty_readable(&mut self) {
-        let mut buf = [0u8; 65536];
-        let mut total = 0;
-        loop {
-            match self.pty.read(&mut buf) {
-                Ok(0) => {
-                    self.pty.reap();
-                    self.exit = true;
-                    return;
-                }
-                Ok(n) => {
-                    let was_sync = self.term.modes.sync;
-                    self.term.advance(&buf[..n]);
-                    total += n;
-                    if !was_sync && self.term.modes.sync {
-                        self.start_sync_timer();
-                    }
-                    if total >= READ_BUDGET {
-                        break;
-                    }
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(_) => {
-                    self.exit = true;
-                    return;
-                }
-            }
+    fn on_pty_data(&mut self, data: &[u8]) {
+        let was_sync = self.term.modes.sync;
+        self.term.advance(data);
+        if !was_sync && self.term.modes.sync {
+            self.start_sync_timer();
         }
         self.after_output();
     }

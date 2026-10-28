@@ -11,6 +11,7 @@
 - memory      スクロールバックを 1 万行埋めたときの RSS (GPU ドライバの分を含めた値と、含めない値)
 - vim         vim の描画時間を 5 つの型で (1 文字の入力、1 行のスクロール、画面全体の変化、
               左右に分けた状態でのスクロール、tmux で左右に分けた状態でのスクロール)
+- cat         色つきと全角を含む 44MB を cat で流しきる時間 (全端末)
 - throughput  vtebench (別に入れておく)
 - latency     hull だけ。キーを押してから画面に出るまで (人がキーを打つ)
 - size        strip したリリースビルドの大きさ (hull だけ)
@@ -98,6 +99,16 @@ def find_terminal_pid(root, name):
     return root
 
 
+def run(cmd, timeout, **kw):
+    """コマンドを動かす。時間内に終わらなければ止めて `None` を返す (1 つが固まっても計測を続ける)。"""
+    try:
+        return subprocess.run(cmd, timeout=timeout, **kw)
+    except subprocess.TimeoutExpired:
+        print(f"# 時間内に終わらなかったので止めました: {' '.join(cmd[:3])} ...", file=sys.stderr)
+        subprocess.run(["tmux", "-L", "hullbench", "kill-server"], stderr=subprocess.DEVNULL)
+        return None
+
+
 def median(xs):
     return statistics.median(xs) if xs else float("nan")
 
@@ -121,11 +132,11 @@ def first_commit_ms(log, t0):
         if not m:
             continue
         ts = int(m.group(1)) + int(m.group(2)) / 1000
-        a = re.search(r"-> (wl_surface#\d+)\.attach\(wl_buffer#\d+", line)
+        a = re.search(r"-> (wl_surface[#@]\d+)\.attach\(wl_buffer[#@]\d+", line)
         if a:
             attached.add(a.group(1))
             continue
-        c = re.search(r"-> (wl_surface#\d+)\.commit\(\)", line)
+        c = re.search(r"-> (wl_surface[#@]\d+)\.commit\(\)", line)
         if c and c.group(1) in attached:
             return (ts - t0) % wrap
     return None
@@ -138,18 +149,17 @@ def bench_startup(names, hull, runs):
         for _ in range(runs):
             env = dict(os.environ, WAYLAND_DEBUG="1")
             t0 = realtime_debug_ms()
-            p = subprocess.run(terminal_command(name, hull, ["sh", "-c", "sleep 0.7"]),
-                               capture_output=True, text=True, env=env, timeout=30)
-            ms = first_commit_ms(p.stderr, t0)
+            p = run(terminal_command(name, hull, ["sh", "-c", "sleep 0.7"]), 30,
+                    capture_output=True, text=True, env=env)
+            ms = first_commit_ms(p.stderr, t0) if p else None
             if ms is not None:
                 commits.append(ms)
             time.sleep(0.5)
         if name == "hull":
             for _ in range(runs):
                 t0 = time.clock_gettime(time.CLOCK_MONOTONIC)
-                p = subprocess.run([hull, "--bench-startup", "-e", "sleep", "5"],
-                                   capture_output=True, text=True, timeout=30)
-                for kind, sec, nsec in re.findall(r"hull-(\S+) clk_id=1 sec=(\d+) nsec=(\d+)", p.stdout):
+                p = run([hull, "--bench-startup", "-e", "sleep", "5"], 30, capture_output=True, text=True)
+                for kind, sec, nsec in re.findall(r"hull-(\S+) clk_id=1 sec=(\d+) nsec=(\d+)", p.stdout if p else ""):
                     ms = (int(sec) + int(nsec) / 1e9 - t0) * 1000
                     (frames if kind == "first-frame" else gpu_frames).append(ms)
                 time.sleep(0.5)
@@ -303,8 +313,8 @@ def bench_vim(names, hull, n=300):
                        ";", "split-window", "-h", "-d", "sleep 600"]
             else:
                 cmd = vim
-            subprocess.run(terminal_command(name, hull, cmd), env=env, timeout=600,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            run(terminal_command(name, hull, cmd), 180, env=env,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             try:
                 with open(out) as f:
                     row.append(f"{float(f.read()):.3f}")
@@ -313,6 +323,39 @@ def bench_vim(names, hull, n=300):
         rows.append(row)
     return table(["端末"] + [labels[k] + " (ms)" for k in kinds], rows,
                  f"vim で {n} 回操作して、1 回あたりの時間 (redraw まで)。小さいほど速い。")
+
+
+# ---- cat ----
+
+def bench_cat(names, hull, runs=3):
+    """色つきと全角を含む 40 万行 (約 44MB) を cat で流しきる時間。vtebench がないときの目安にもなる。"""
+    import random
+    tmp = tempfile.mkdtemp(prefix="hullbench-cat-")
+    data = os.path.join(tmp, "big.txt")
+    rnd = random.Random(1)
+    with open(data, "w") as f:
+        for i in range(400000):
+            body = "".join(rnd.choice("abcdefghij klmnop") for _ in range(80))
+            f.write(f"\x1b[3{i % 7 + 1}m{i:08d}\x1b[0m {body} 日本語\n")
+    size = os.path.getsize(data) / 1e6
+    rows = []
+    for name in names:
+        times = []
+        for k in range(runs):
+            out = os.path.join(tmp, f"{name}-{k}.txt")
+            script = f's=$(date +%s.%N); cat {data}; e=$(date +%s.%N); echo "$s $e" > {out}'
+            run(terminal_command(name, hull, ["sh", "-c", script]), 300,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            try:
+                with open(out) as f:
+                    s0, s1 = map(float, f.read().split())
+                times.append(s1 - s0)
+            except (OSError, ValueError):
+                pass
+            time.sleep(0.5)
+        t = median(times)
+        rows.append([name, f"{t:.2f}", f"{size / t:.0f}" if times else "-"])
+    return table(["端末", "秒", "MB/s"], rows, f"{size:.1f}MB を cat で流しきる時間の中央値 ({runs} 回)。")
 
 
 # ---- throughput ----
@@ -359,7 +402,7 @@ def machine():
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("what", choices=["all", "startup", "idle", "memory", "vim", "throughput", "size"])
+    ap.add_argument("what", choices=["all", "startup", "idle", "memory", "vim", "cat", "throughput", "size"])
     ap.add_argument("--hull", default=os.path.join(HERE, "..", "target", "release", "hull"))
     ap.add_argument("--terminals", default="hull,alacritty,foot,ghostty")
     ap.add_argument("--runs", type=int, default=10)
@@ -370,10 +413,10 @@ def main():
     names = available(args.terminals.split(","), hull)
 
     sections = []
-    todo = ["size", "startup", "idle", "memory", "vim", "throughput"] if args.what == "all" else [args.what]
+    todo = ["size", "startup", "idle", "memory", "cat", "vim", "throughput"] if args.what == "all" else [args.what]
     for what in todo:
         title = {"size": "バイナリ", "startup": "起動", "idle": "アイドル", "memory": "メモリ",
-                 "vim": "vim の描画時間", "throughput": "スループット"}[what]
+                 "vim": "vim の描画時間", "cat": "cat で流しきる時間", "throughput": "スループット"}[what]
         print(f"# {title} を測っています", file=sys.stderr)
         if what == "size":
             body = bench_size(hull)
@@ -385,6 +428,8 @@ def main():
             body = bench_memory(names, hull)
         elif what == "vim":
             body = bench_vim(names, hull)
+        elif what == "cat":
+            body = bench_cat(names, hull)
         else:
             body = bench_throughput(names, hull, args.vtebench, args.vtebench_benchmarks)
         sections.append(f"## {title}\n\n{body}")
