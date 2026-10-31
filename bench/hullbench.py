@@ -34,17 +34,33 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 COLS, ROWS = 100, 30
+# スクロールバックの行数。端末ごとに既定が違う (foot は 1000 行) ので、明示してそろえる。
+HISTORY = 10_000
+_hull_config = None
+
+
+def hull_config():
+    """hull に渡す設定ファイル。利用者の設定 (~/.config/hull/hull.toml) に左右されないようにする。"""
+    global _hull_config
+    if _hull_config is None:
+        fd, _hull_config = tempfile.mkstemp(prefix="hullbench-", suffix=".toml")
+        with os.fdopen(fd, "w") as f:
+            f.write(f"[window]\ncolumns = {COLS}\nlines = {ROWS}\n\n[scrollback]\nlines = {HISTORY}\n")
+    return _hull_config
 
 
 def terminal_command(name, hull, cmd):
-    """端末 `name` で `cmd` を動かすコマンド。窓の大きさは 100x30 にそろえる。"""
+    """端末 `name` で `cmd` を動かすコマンド。窓の大きさは 100x30、スクロールバックは 1 万行にそろえる。
+
+    ghostty だけは上限を行数でなくバイト数で決める (`scrollback-limit`、既定 10MB) ので、既定のままにする。
+    """
     if name == "hull":
-        return [hull, "-e", *cmd]
+        return [hull, "--config", hull_config(), "-e", *cmd]
     if name == "alacritty":
         return ["alacritty", "-o", f"window.dimensions.columns={COLS}",
-                "-o", f"window.dimensions.lines={ROWS}", "-e", *cmd]
+                "-o", f"window.dimensions.lines={ROWS}", "-o", f"scrolling.history={HISTORY}", "-e", *cmd]
     if name == "foot":
-        return ["foot", f"--window-size-chars={COLS}x{ROWS}", *cmd]
+        return ["foot", f"--window-size-chars={COLS}x{ROWS}", "-o", f"scrollback.lines={HISTORY}", *cmd]
     if name == "ghostty":
         return ["ghostty", f"--window-width={COLS}", f"--window-height={ROWS}",
                 "--gtk-single-instance=false", "-e", *cmd]
@@ -158,7 +174,7 @@ def bench_startup(names, hull, runs):
         if name == "hull":
             for _ in range(runs):
                 t0 = time.clock_gettime(time.CLOCK_MONOTONIC)
-                p = run([hull, "--bench-startup", "-e", "sleep", "5"], 30, capture_output=True, text=True)
+                p = run([hull, "--config", hull_config(), "--bench-startup", "-e", "sleep", "5"], 30, capture_output=True, text=True)
                 for kind, sec, nsec in re.findall(r"hull-(\S+) clk_id=1 sec=(\d+) nsec=(\d+)", p.stdout if p else ""):
                     ms = (int(sec) + int(nsec) / 1e9 - t0) * 1000
                     (frames if kind == "first-frame" else gpu_frames).append(ms)
@@ -214,7 +230,12 @@ DRIVER = re.compile(r"nvidia|libLLVM|libgallium|/dri/|/dev/dri|libvulkan|libEGL_
 
 
 def rss(pid):
-    total = driver = 0
+    """RSS、GPU ドライバを除いた RSS、PSS、Private (KB)。
+
+    RSS はほかのプロセスと共有しているページも数えるので、共有ライブラリの多い端末 (GPU のドライバを読むもの) が
+    大きく出る。PSS は共有のページを使っているプロセスの数で割った値、Private はこのプロセスだけが使うページ。
+    """
+    total = driver = pss = private = 0
     name = ""
     with open(f"/proc/{pid}/smaps") as f:
         for line in f:
@@ -226,7 +247,11 @@ def rss(pid):
                 total += kb
                 if DRIVER.search(name):
                     driver += kb
-    return total, total - driver
+            elif line.startswith("Pss:"):
+                pss += int(line.split()[1])
+            elif line.startswith(("Private_Clean:", "Private_Dirty:")):
+                private += int(line.split()[1])
+    return total, total - driver, pss, private
 
 
 def bench_memory(names, hull):
@@ -239,13 +264,15 @@ def bench_memory(names, hull):
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(8)
         pid = find_terminal_pid(p.pid, name)
-        total, without = rss(pid)
+        total, without, pss, private = rss(pid)
         p.terminate()
         p.wait()
-        rows.append([name, f"{total / 1024:.1f}", f"{without / 1024:.1f}"])
-    return table(["端末", "RSS (MB)", "RSS、GPU ドライバのライブラリを除く (MB)"], rows,
+        rows.append([name] + [f"{kb / 1024:.1f}" for kb in (total, without, pss, private)])
+    return table(["端末", "RSS (MB)", "RSS、GPU ドライバのライブラリを除く (MB)", "PSS (MB)", "Private (MB)"], rows,
                  "スクロールバックを 1 万行 (1 行 90 文字ほど) 埋めて測る。"
-                 "ドライバがヒープに取った分は分けられないので、右の列にも含まれる。")
+                 "ドライバがヒープに取った分は分けられないので、2 列目にも含まれる。"
+                 "RSS は共有ライブラリのページも数えるので、PSS (共有のページを使っているプロセスの数で割る) と "
+                 "Private (このプロセスだけが使うページ) も出す。")
 
 
 # ---- vim ----
